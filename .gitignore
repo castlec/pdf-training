@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+runs/
+private/
+source-data/
+datasets/private/
+*.checkpoint
+*.lstm
+*.lstmf
+*.__tmp__

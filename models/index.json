@@ -1,0 +1,27 @@
+{
+  "schema": "pdf-training-model-index-v1",
+  "models": [
+    {
+      "family": "equation-latin",
+      "version": "1.0.0",
+      "artifact": "equation-latin/1.0.0/equation-latin.traineddata"
+    },
+    {
+      "family": "equation-vector",
+      "version": "1.0.0",
+      "artifact": "equation-vector/1.0.0/equation-vector.traineddata",
+      "internal_tokens": {
+        "U+E000": "F followed by U+20D7"
+      }
+    },
+    {
+      "family": "equation-greek",
+      "version": "1.0.0",
+      "artifact": "equation-greek/1.0.0/equation-greek.traineddata",
+      "added_characters": [
+        "U+03B1",
+        "U+03B2"
+      ]
+    }
+  ]
+}
