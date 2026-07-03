@@ -2383,7 +2383,12 @@ def main() -> int:
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Serving on http://{args.host}:{args.port}")
     print(f"Annotation root: {args.annotation_root}")
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nShutting down.")
+    finally:
+        server.server_close()
     return 0
 
 
