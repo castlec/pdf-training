@@ -31,6 +31,14 @@ tools/                            Generic collection, annotation, and training t
 docs/                             Dataset and model conventions
 ```
 
+## Page Geometry
+
+The reusable frame annotation, automatic deskew, crop comparison, per-page
+origin, and final crop tools are documented in
+[`docs/deskew-and-crop-workflow.md`](docs/deskew-and-crop-workflow.md).
+Keep book-specific PDFs, rendered pages, and annotation state in the private
+book workspace.
+
 ## Dataset Export
 
 ```bash

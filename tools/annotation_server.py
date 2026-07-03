@@ -2100,8 +2100,12 @@ class AnnotationStore:
                 for layer_dir in [masks_text_dir, masks_image_dir, masks_equation_dir]:
                     mask_path = layer_dir / f"page-{idx:03d}.png"
                     if not mask_path.exists():
-                        src_img = cv2.imread(str(page_images[idx - 1]), cv2.IMREAD_COLOR) if idx - 1 < len(page_images) else None
-                        blank = np.zeros(src_img.shape[:2], dtype=np.uint8) if src_img is not None else np.zeros((3508, 2480), dtype=np.uint8)
+                        if idx - 1 >= len(page_images):
+                            raise RuntimeError(f"Missing rendered page {idx} for {doc_name}")
+                        src_img = cv2.imread(str(page_images[idx - 1]), cv2.IMREAD_COLOR)
+                        if src_img is None:
+                            raise RuntimeError(f"Could not read rendered page: {page_images[idx - 1]}")
+                        blank = np.zeros(src_img.shape[:2], dtype=np.uint8)
                         cv2.imwrite(str(mask_path), blank)
             self.docs.append(
                 PDFDoc(
