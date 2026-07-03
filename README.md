@@ -51,6 +51,12 @@ Before publishing:
 python3 tools/check_publishable.py
 ```
 
+Run synthetic web-application tests:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
 ## Training
 
 ```bash
