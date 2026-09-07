@@ -39,6 +39,15 @@ origin, and final crop tools are documented in
 Keep book-specific PDFs, rendered pages, and annotation state in the private
 book workspace.
 
+## Layout And Rendering
+
+The reusable layout extraction and rendering rules are documented in
+[`docs/layout-rendering-workflow.md`](docs/layout-rendering-workflow.md).
+Those rules capture the current project baseline: detect layout geometrically,
+compose text/equation/image nodes without deleting source content, validate each
+candidate against the previous accepted baseline, and keep book-specific
+coordinates in private workspaces.
+
 ## Dataset Export
 
 ```bash
@@ -53,10 +62,22 @@ and optional `tags`. Exported manifests contain relative paths and omit
 book-specific source geometry. Exporting does not grant redistribution rights;
 private output is the default workflow.
 
+For symbols arranged in known page cells, keep the source-specific coordinates
+under ignored `private/` and build normalized crops with:
+
+```bash
+python3 tools/extract_cell_dataset.py \
+  --config private/book-symbol-cells.json \
+  --output private/book-symbols-v1
+```
+
+The extractor supports contrast stretching, scaling, and border whitening to
+remove table rules without embedding book-specific assumptions in the tool.
+
 Before publishing:
 
 ```bash
-python3 tools/check_publishable.py
+python3 tools/check_publishable.py --tracked-only
 ```
 
 Run synthetic web-application tests:

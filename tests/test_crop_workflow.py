@@ -32,6 +32,8 @@ def load_tool(name: str):
 INITIALIZE = load_tool("initialize_pages")
 APPLY_ANNOTATIONS = load_tool("apply_crop_annotations")
 APPLY_ORIGINS = load_tool("apply_crop_origins")
+REPAINT_MARGINS = load_tool("repaint_page_margins")
+EXTRACT_CELLS = load_tool("extract_cell_dataset")
 CROP_SERVER = load_tool("crop_annotation_server")
 ORIGIN_SERVER = load_tool("crop_origin_server")
 COMPARE_SERVER = load_tool("crop_compare_server")
@@ -138,6 +140,34 @@ class CropWorkflowTest(unittest.TestCase):
 
         self.assertLess(int(rotated[245:256, 145:156].mean()), 40)
         self.assertGreater(int(rotated[145:156, 245:256].mean()), 240)
+
+    def test_declared_margins_are_repainted_without_touching_interior(self) -> None:
+        image = np.full((100, 80, 3), 210, dtype=np.uint8)
+        image[5, 5] = 0
+        image[50, 40] = (10, 20, 30)
+        state = {
+            "page_side": "right",
+            "margins": {"top": 10, "bottom": 15, "inner": 8, "outer": 6},
+        }
+
+        cleaned = REPAINT_MARGINS.repaint(image, state)
+
+        self.assertTrue(np.all(cleaned[:10] == 255))
+        self.assertTrue(np.all(cleaned[-15:] == 255))
+        self.assertTrue(np.all(cleaned[:, :8] == 255))
+        self.assertTrue(np.all(cleaned[:, -6:] == 255))
+        self.assertEqual(tuple(cleaned[50, 40]), (10, 20, 30))
+
+    def test_cell_normalization_removes_border_rules(self) -> None:
+        image = np.full((40, 60, 3), 225, dtype=np.uint8)
+        cv2.rectangle(image, (0, 0), (59, 39), (0, 0, 0), 2)
+        cv2.putText(image, "F", (24, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (20, 20, 20), 2)
+
+        cleaned = EXTRACT_CELLS.normalize_contrast(image, scale=2, border_white=4)
+
+        self.assertEqual(cleaned.shape, (80, 120))
+        self.assertGreater(int(cleaned[:6].mean()), 250)
+        self.assertLess(int(cleaned[30:70, 35:85].min()), 80)
 
     def test_crop_web_apps_serve_synthetic_data(self) -> None:
         source = self.root / "pages"

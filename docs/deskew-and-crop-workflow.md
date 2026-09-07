@@ -66,6 +66,16 @@ repository or publish them unless redistribution rights are documented.
      --output-root /private/book/origin-cropped-pages
    ```
 
+5. Repaint the declared safe margins after origin cropping. This removes
+   scanner shadows without altering page content or annotation coordinates:
+
+   ```bash
+   python3 tools/repaint_page_margins.py \
+     --source-root /private/book/origin-cropped-pages \
+     --state-root /private/book/crop-origin-annotations \
+     --output-root /private/book/clean-pages
+   ```
+
 The generated `pages/`, `deskewed-pages/`, `cropped-pages/`, and
-`origin-cropped-pages/` trees can be rebuilt from the private PDFs plus the two
-annotation-state directories.
+`origin-cropped-pages/`, and `clean-pages/` trees can be rebuilt from the
+private PDFs plus the two annotation-state directories.
