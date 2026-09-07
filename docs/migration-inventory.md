@@ -28,6 +28,8 @@ inputs, private annotations, generated datasets, and exploratory reports.
   - `tools/render_page_html.py`
 - Generic equation crop review and reviewed-LaTeX merge workflow:
   - `tools/equation_review.py`
+- Generic text segment crop review and reviewed-text merge workflow:
+  - `tools/text_segment_review.py`
 - Generic cell-based OCR sample extraction:
   - `tools/extract_cell_dataset.py`
 - Generic margin repainting after origin crop:
@@ -57,7 +59,6 @@ These behaviors should be generalized before they are promoted here:
 
 - header/footer rule generation
 - outline-assisted heading classification
-- line/segment text transcription workflow
 - vision-model review prompt templates that do not contain book text
 
 ## Migration Rule

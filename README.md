@@ -122,6 +122,33 @@ python3 tools/equation_review.py merge \
   --out private/book/renderable-reviewed/page-001.json
 ```
 
+Build a generic text-segment review dataset from renderable metadata:
+
+```bash
+python3 tools/text_segment_review.py build \
+  --input private/book/renderable/page-001.json \
+  --source-base private/book \
+  --report-root private/book/text-segment-review/page-001 \
+  --tesseract \
+  --ocr-lang ces+eng \
+  --provider ollama-chat \
+  --host http://127.0.0.1:11434 \
+  --model gemma3
+```
+
+The text segment workflow crops only existing `text_fragment` nodes. If a page
+does not yet have fragments, it derives segment boxes from `text_band` nodes by
+splitting around equation/image obstacles. Corrections merge back into
+renderable metadata the same way as equation review:
+
+```bash
+python3 tools/text_segment_review.py merge \
+  --metadata private/book/renderable/page-001.json \
+  --summary private/book/text-segment-review/page-001/summary.json \
+  --corrections-root private/book/text-segment-review/page-001/corrections \
+  --out private/book/renderable-reviewed/page-001.json
+```
+
 ## Dataset Export
 
 ```bash

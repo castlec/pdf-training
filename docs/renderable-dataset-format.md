@@ -236,3 +236,52 @@ write them without mutating source metadata:
 then any existing source LaTeX. It matches equations by stable id first and bbox
 IoU second, which allows private projects to recover reviewed values after minor
 metadata regeneration.
+
+## Text Segment Review Dataset
+
+Text segment review output is private source-derived data. It is structurally
+similar to equation review, but targets text-bearing nodes:
+
+```json
+{
+  "schema": "pdf-training-text-segment-review-v1",
+  "total": 1,
+  "processed": 1,
+  "items": [
+    {
+      "id": "document-p001-frag-0001",
+      "page_id": "document-p001",
+      "target_node": "document-p001-frag-0001",
+      "bbox": {"x": 120, "y": 220, "w": 460, "h": 36},
+      "assets": {
+        "segment_crop": "assets/segments/document-p001-frag-0001.png"
+      },
+      "source_text": "",
+      "ocr_text": "recognized text",
+      "vision_text": "reviewed text",
+      "vision_text_with_refs": "reviewed text [[REF:equation-id]]",
+      "mask_refs": [],
+      "item_json": "items/document-p001-frag-0001.json"
+    }
+  ]
+}
+```
+
+The builder prefers existing `text_fragment` nodes. If only `text_band` nodes
+exist, it creates temporary segment boxes by subtracting equation/image
+obstacles. Known equations and images are never sent as the target text crop;
+their intersections are recorded as `mask_refs` for downstream inline-anchor
+placement.
+
+Corrections use separate files:
+
+```json
+{
+  "id": "document-p001-frag-0001",
+  "text": "corrected visible text"
+}
+```
+
+`tools/text_segment_review.py merge` applies correction files first, then vision
+text, then OCR text, then existing source text. It updates only matched
+text-bearing nodes and records merge provenance.

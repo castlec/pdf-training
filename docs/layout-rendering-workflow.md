@@ -86,6 +86,20 @@ OCR text values must not decide whether a band exists, is split, is removed, or
 is classified. OCR and vision models populate or check content after layout is
 defined.
 
+## Text Segment Review
+
+Text transcription should operate on exact text-bearing crop images, not full
+pages. The reusable workflow is:
+
+- Use existing `text_fragment` nodes when available.
+- If only `text_band` nodes exist, split them around equation/image obstacles to
+  create temporary text segment crops.
+- Do not pass known equation/image pixels as the target text crop.
+- Preserve equation/image intersections as `mask_refs` so later rendering can
+  place inline anchors.
+- Treat OCR and vision output as content evidence only; corrections merge back
+  into matched text nodes with provenance.
+
 ## Equation And Image Composition
 
 Equation and image annotations should be intersected with text bands only after
