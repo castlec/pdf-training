@@ -48,6 +48,19 @@ compose text/equation/image nodes without deleting source content, validate each
 candidate against the previous accepted baseline, and keep book-specific
 coordinates in private workspaces.
 
+Generic geometry-first primitive detection is available as:
+
+```bash
+python3 tools/layout_detect.py \
+  --image private/book/pages/page-001.png \
+  --mask equation=private/book/masks/page-001-equations.png \
+  --out private/book/layout/page-001.json
+```
+
+The detector emits text bands, internal line metrics, horizontal rules, optional
+mask intersections, edge-expansion data, and audited cleanup actions. It does
+not run OCR and does not use OCR text to decide layout.
+
 ## Dataset Export
 
 ```bash

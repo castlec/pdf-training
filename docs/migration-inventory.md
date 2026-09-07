@@ -18,6 +18,8 @@ inputs, private annotations, generated datasets, and exploratory reports.
 
 ## Newly Consolidated
 
+- Generic layout primitive detection:
+  - `tools/layout_detect.py`
 - Generic cell-based OCR sample extraction:
   - `tools/extract_cell_dataset.py`
 - Generic margin repainting after origin crop:
@@ -45,8 +47,6 @@ generic tools:
 
 These behaviors should be generalized before they are promoted here:
 
-- density-based line and band detection
-- superscript/vector/subscript edge expansion
 - equation/image intersection and text-fragment splitting
 - header/footer rule generation
 - outline-assisted heading classification
