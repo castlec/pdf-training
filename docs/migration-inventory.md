@@ -40,6 +40,8 @@ inputs, private annotations, generated datasets, and exploratory reports.
   - `tools/repaint_page_margins.py`
 - Reusable layout/rendering rules:
   - `docs/layout-rendering-workflow.md`
+- Reusable optional pipeline chain patterns:
+  - `docs/pipeline-chains.md`
 - Renderable dataset schema contract:
   - `docs/renderable-dataset-format.md`
 

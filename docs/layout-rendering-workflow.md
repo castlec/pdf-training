@@ -5,6 +5,9 @@ technical scanned-PDF reconstruction work. Keep book-specific coordinates,
 source pages, crops, masks, OCR output, and generated renders outside this
 publishable repository unless redistribution rights are documented.
 
+For optional end-to-end sequencing patterns, see
+[`pipeline-chains.md`](pipeline-chains.md).
+
 ## Goal
 
 Produce a renderable page dataset where layout geometry, text banding, text

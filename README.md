@@ -43,6 +43,8 @@ book workspace.
 
 The reusable layout extraction and rendering rules are documented in
 [`docs/layout-rendering-workflow.md`](docs/layout-rendering-workflow.md).
+Expected optional chain patterns are documented in
+[`docs/pipeline-chains.md`](docs/pipeline-chains.md).
 Those rules capture the current project baseline: detect layout geometrically,
 compose text/equation/image nodes without deleting source content, validate each
 candidate against the previous accepted baseline, and keep book-specific
