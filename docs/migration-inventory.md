@@ -26,6 +26,8 @@ inputs, private annotations, generated datasets, and exploratory reports.
   - `tools/validate_render_dataset.py`
 - Generic full quality-check bundle for renderable pages/datasets:
   - `tools/quality_check.py`
+- Generic document-structure rules for outline-assisted headings and generated headers/footers:
+  - `tools/document_structure.py`
 - Generic fixed-layout HTML/MathML render preview and comparison viewer:
   - `tools/render_page_html.py`
 - Generic equation crop review and reviewed-LaTeX merge workflow:
@@ -59,8 +61,6 @@ generic tools:
 
 These behaviors should be generalized before they are promoted here:
 
-- header/footer rule generation
-- outline-assisted heading classification
 - vision-model review prompt templates that do not contain book text
 
 ## Migration Rule

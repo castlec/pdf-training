@@ -320,3 +320,87 @@ Corrections use separate files:
 `tools/text_segment_review.py merge` applies correction files first, then vision
 text, then OCR text, then existing source text. It updates only matched
 text-bearing nodes and records merge provenance.
+
+## Document Structure Rules
+
+Header/footer and outline data are document-specific, but the mechanics are
+reusable. Private projects should keep concrete outline strings and coordinates
+outside the publishable repository.
+
+Outline entries:
+
+```json
+{
+  "schema": "pdf-training-outline-v1",
+  "entries": [
+    {
+      "section": "1.2",
+      "title": "Private Heading Title",
+      "printed_page": 10,
+      "level": 2,
+      "running_header": "Optional shorter header"
+    }
+  ]
+}
+```
+
+Printed-page map:
+
+```json
+{
+  "schema": "pdf-training-page-map-v1",
+  "entries": [
+    {
+      "page_id": "document-p010",
+      "source_page_index": 9,
+      "output_page_index": 9,
+      "printed_page": 10,
+      "printed_page_source": "footer_text|inferred_offset|manual"
+    }
+  ]
+}
+```
+
+Header/footer rule templates:
+
+```json
+{
+  "schema": "pdf-training-document-rules-v1",
+  "id": "private-book-rules",
+  "fallback_running_header": "BOOK",
+  "ocr_exclusion_bands": [
+    {
+      "id": "header-band",
+      "bbox": {"x": 0, "y": 0, "w": 1000, "h": 90},
+      "reason": "generated_header"
+    }
+  ],
+  "templates": {
+    "odd": {
+      "nodes": [
+        {
+          "id": "odd-header-text",
+          "type": "header",
+          "class": "running_header",
+          "text": "{running_header}",
+          "bbox": {"x": 700, "y": 40, "w": 250, "h": 30},
+          "align": "right"
+        },
+        {
+          "id": "odd-footer-number",
+          "type": "page_number",
+          "class": "footer_page_number",
+          "text": "{printed_page}",
+          "bbox": {"x": 900, "y": 930, "w": 40, "h": 30}
+        }
+      ]
+    }
+  }
+}
+```
+
+`tools/document_structure.py apply` uses page-map printed pages to find active
+outline context, promotes matching text nodes to `heading_level_N`, optionally
+demotes unmatched heading nodes, suppresses OCR-derived header/footer source
+nodes inside declared exclusion bands, and appends generated header/footer/rule
+nodes.

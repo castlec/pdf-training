@@ -161,6 +161,16 @@ be promoted as a body heading.
 Heading font selection should be derived from heading level and document style,
 not from ad-hoc OCR styling.
 
+Use `tools/document_structure.py` for the reusable portion of this workflow:
+
+- `page-map` extracts printed page labels from footer text nodes or applies a
+  private offset rule.
+- `apply` uses private outline entries and private header/footer templates to
+  classify headings, suppress OCR header/footer source nodes, and append
+  generated recurring structure.
+- Concrete outline titles, page maps, and header/footer coordinates are
+  document-specific private metadata.
+
 ## Validation
 
 Every algorithmic change must start from the current accepted baseline.

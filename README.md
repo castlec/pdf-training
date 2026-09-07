@@ -98,6 +98,29 @@ It includes baseline content-loss checks, bbox bounds, class-height ranges,
 line-break contamination, duplicate boxes, text/obstacle intersections, and
 optional source-image density checks.
 
+Build a printed-page map from footer text nodes, then apply private outline and
+header/footer template rules:
+
+```bash
+python3 tools/document_structure.py page-map \
+  --input private/book/renderable/page-001.json \
+  --out private/book/structure/page-map.json
+
+python3 tools/document_structure.py apply \
+  --input private/book/renderable/page-001.json \
+  --outline private/book/structure/outline.json \
+  --page-map private/book/structure/page-map.json \
+  --rules private/book/structure/header-footer-rules.json \
+  --out private/book/renderable-structured/page-001.json \
+  --report private/book/structure/page-001-report.json \
+  --review-html private/book/structure/page-001-report.html \
+  --demote-unmatched
+```
+
+Outline entries and header/footer templates are source-specific private data.
+The reusable tool only provides matching, generation, suppression, and report
+mechanics.
+
 Render a composed page as fixed-layout HTML, optionally with a side-by-side
 comparison against the private source page image:
 
