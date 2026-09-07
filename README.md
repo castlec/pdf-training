@@ -61,6 +61,26 @@ The detector emits text bands, internal line metrics, horizontal rules, optional
 mask intersections, edge-expansion data, and audited cleanup actions. It does
 not run OCR and does not use OCR text to decide layout.
 
+Compose layout primitives and private annotations into renderable page metadata:
+
+```bash
+python3 tools/render_compose.py \
+  --layout private/book/layout/page-001.json \
+  --annotations private/book/annotations/page-001.json \
+  --out private/book/renderable/page-001.json \
+  --review-html private/book/renderable/page-001.html
+```
+
+Validate a candidate renderable page or dataset against its immediate baseline:
+
+```bash
+python3 tools/validate_render_dataset.py \
+  --baseline private/book/renderable-baseline/page-001.json \
+  --candidate private/book/renderable-candidate/page-001.json \
+  --out private/book/validation/page-001.json \
+  --review-html private/book/validation/page-001.html
+```
+
 ## Dataset Export
 
 ```bash

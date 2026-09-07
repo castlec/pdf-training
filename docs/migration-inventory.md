@@ -20,6 +20,10 @@ inputs, private annotations, generated datasets, and exploratory reports.
 
 - Generic layout primitive detection:
   - `tools/layout_detect.py`
+- Generic renderable metadata composition:
+  - `tools/render_compose.py`
+- Generic baseline/candidate render dataset validation:
+  - `tools/validate_render_dataset.py`
 - Generic cell-based OCR sample extraction:
   - `tools/extract_cell_dataset.py`
 - Generic margin repainting after origin crop:
@@ -47,10 +51,8 @@ generic tools:
 
 These behaviors should be generalized before they are promoted here:
 
-- equation/image intersection and text-fragment splitting
 - header/footer rule generation
 - outline-assisted heading classification
-- baseline-versus-candidate validation reporting
 - HTML/CSS/MathML render preview generation
 - vision-model review prompt templates that do not contain book text
 
