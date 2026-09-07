@@ -168,6 +168,41 @@ Candidate pipelines should emit reviewable validation reports:
 Do not promote a candidate dataset when `regressions` contains unresolved
 content loss.
 
+## Quality Report
+
+`tools/quality_check.py` emits a broader report intended to gate candidate
+promotion:
+
+```json
+{
+  "schema": "pdf-training-quality-report-v1",
+  "candidate": "document-p001",
+  "created_at": "2026-01-01T00:00:00+00:00",
+  "summary": {
+    "status": "pass|review|fail",
+    "pages": 1,
+    "findings": 0,
+    "errors": 0,
+    "review": 0,
+    "checks": {}
+  },
+  "baseline_report": null,
+  "findings": []
+}
+```
+
+Findings use `severity: "error"` for content loss or invalid geometry and
+`severity: "review"` for suspicious-but-not-proven conditions. Current generic
+checks include:
+
+- bbox presence, positive size, and page bounds
+- class height ranges
+- actual or literal newline contamination in text-like fields
+- text nodes intersecting equation/image/table nodes without explicit relations
+- same-type near-duplicate bboxes
+- optional source-image density and multi-row band checks
+- optional baseline regression checks
+
 ## HTML Render Review
 
 Renderable pages can be reviewed with the generic fixed-layout HTML renderer:

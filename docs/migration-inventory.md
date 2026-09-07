@@ -24,6 +24,8 @@ inputs, private annotations, generated datasets, and exploratory reports.
   - `tools/render_compose.py`
 - Generic baseline/candidate render dataset validation:
   - `tools/validate_render_dataset.py`
+- Generic full quality-check bundle for renderable pages/datasets:
+  - `tools/quality_check.py`
 - Generic fixed-layout HTML/MathML render preview and comparison viewer:
   - `tools/render_page_html.py`
 - Generic equation crop review and reviewed-LaTeX merge workflow:

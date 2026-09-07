@@ -81,6 +81,23 @@ python3 tools/validate_render_dataset.py \
   --review-html private/book/validation/page-001.html
 ```
 
+Run the full reusable quality-check bundle for a renderable candidate:
+
+```bash
+python3 tools/quality_check.py \
+  --candidate private/book/renderable-candidate/page-001.json \
+  --baseline private/book/renderable-baseline/page-001.json \
+  --source-base private/book \
+  --density \
+  --out private/book/validation/page-001-quality.json \
+  --review-html private/book/validation/page-001-quality.html
+```
+
+`quality_check.py` is the preferred gate before promoting a candidate dataset.
+It includes baseline content-loss checks, bbox bounds, class-height ranges,
+line-break contamination, duplicate boxes, text/obstacle intersections, and
+optional source-image density checks.
+
 Render a composed page as fixed-layout HTML, optionally with a side-by-side
 comparison against the private source page image:
 

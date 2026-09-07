@@ -176,6 +176,11 @@ described as a proposal:
 - equation/image intersection audit
 - header/footer/outline audit when applicable
 
+Use `tools/quality_check.py` as the reusable validation entry point. It can run
+against one renderable page or a multi-document renderable dataset, and it can
+include `tools/validate_render_dataset.py` baseline comparison as part of the
+same report.
+
 If a candidate creates a regression, discard that candidate and make a different
 change from the accepted baseline. Do not stack fixes on top of a known-bad
 candidate unless the bad candidate is explicitly promoted as the new baseline.
