@@ -123,6 +123,17 @@ Equation metadata should include both:
 The original equation crop is review evidence, not the preferred final render
 source.
 
+The reusable HTML renderer follows this policy directly:
+
+- `text` equations are rendered with text-like HTML, preserving simple
+  subscripts, superscripts, vectors, and common technical symbols.
+- `inline_math` and `display_math` equations are rendered as MathML.
+- Equation crops are not rendered as final equation content unless a private
+  project deliberately uses diagnostic fallback output.
+- MathML and text fragments use the same configured body font family by
+  default; individual projects can override fonts through dataset style
+  metadata.
+
 ## Header, Footer, And Outline Rules
 
 Fixed headers, footers, page numbers, and decorative rules should be generated

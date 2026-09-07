@@ -81,6 +81,23 @@ python3 tools/validate_render_dataset.py \
   --review-html private/book/validation/page-001.html
 ```
 
+Render a composed page as fixed-layout HTML, optionally with a side-by-side
+comparison against the private source page image:
+
+```bash
+python3 tools/render_page_html.py \
+  --page private/book/renderable/page-001.json \
+  --out private/book/rendered/page-001.html \
+  --comparison-html private/book/rendered/page-001-comparison.html \
+  --source-image private/book/pages/page-001.png \
+  --show-boxes
+```
+
+The HTML renderer uses fixed page dimensions, background image layers,
+CSS-positioned content nodes, text-style rendering for simple inline equations,
+and MathML for structural equations. Private images and text remain outside the
+repository unless explicitly rights-cleared.
+
 ## Dataset Export
 
 ```bash

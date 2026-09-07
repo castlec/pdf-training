@@ -167,3 +167,28 @@ Candidate pipelines should emit reviewable validation reports:
 
 Do not promote a candidate dataset when `regressions` contains unresolved
 content loss.
+
+## HTML Render Review
+
+Renderable pages can be reviewed with the generic fixed-layout HTML renderer:
+
+```bash
+python3 tools/render_page_html.py \
+  --page private/book/renderable/page-001.json \
+  --out private/book/rendered/page-001.html \
+  --comparison-html private/book/rendered/page-001-comparison.html \
+  --source-image private/book/pages/page-001.png \
+  --show-boxes
+```
+
+The renderer expects page and node coordinates in source-page pixels. It does
+not infer content; it only renders the metadata it receives. Simple equations
+with `render_policy: "text"` are rendered as text-like HTML fragments so inline
+subscripts, superscripts, vectors, and common symbols match the body text more
+closely. Structural equations use browser-native MathML for constructs such as
+fractions and roots.
+
+Images, diagrams, and tables are rendered on a background layer with transparent
+composition enabled by default. This allows text/equation nodes to sit above
+diagram geometry when a private project decomposes a source image into layout
+components.
