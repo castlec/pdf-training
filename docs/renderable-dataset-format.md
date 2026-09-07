@@ -192,3 +192,47 @@ Images, diagrams, and tables are rendered on a background layer with transparent
 composition enabled by default. This allows text/equation nodes to sit above
 diagram geometry when a private project decomposes a source image into layout
 components.
+
+## Equation Review Dataset
+
+Equation review output is private source-derived data. The reusable tool writes
+one JSON file per crop plus a summary and static HTML review page:
+
+```json
+{
+  "schema": "pdf-training-equation-review-v1",
+  "total": 1,
+  "processed": 1,
+  "items": [
+    {
+      "id": "document-p001-eq-0001",
+      "page_id": "document-p001",
+      "bbox": {"x": 120, "y": 300, "w": 180, "h": 44},
+      "assets": {
+        "equation_crop": "assets/equations/document-p001-eq-0001.png",
+        "context_crop": "assets/contexts/document-p001-eq-0001.png"
+      },
+      "ocr_text": "",
+      "vision_latex": "x_T = 12",
+      "source_latex": "",
+      "correction": null,
+      "item_json": "items/document-p001-eq-0001.json"
+    }
+  ]
+}
+```
+
+Corrections are intentionally separate files so private review applications can
+write them without mutating source metadata:
+
+```json
+{
+  "id": "document-p001-eq-0001",
+  "correction": "x_T = 12"
+}
+```
+
+`tools/equation_review.py merge` applies corrections first, then vision LaTeX,
+then any existing source LaTeX. It matches equations by stable id first and bbox
+IoU second, which allows private projects to recover reviewed values after minor
+metadata regeneration.

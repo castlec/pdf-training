@@ -98,6 +98,30 @@ CSS-positioned content nodes, text-style rendering for simple inline equations,
 and MathML for structural equations. Private images and text remain outside the
 repository unless explicitly rights-cleared.
 
+Build a generic equation-review dataset from renderable metadata:
+
+```bash
+python3 tools/equation_review.py build \
+  --input private/book/renderable/page-001.json \
+  --source-base private/book \
+  --report-root private/book/equation-review/page-001 \
+  --provider ollama-chat \
+  --host http://127.0.0.1:11434 \
+  --model gemma3
+```
+
+After human or automated correction files are written under
+`corrections/<equation-id>.json`, merge accepted LaTeX back into renderable
+metadata:
+
+```bash
+python3 tools/equation_review.py merge \
+  --metadata private/book/renderable/page-001.json \
+  --summary private/book/equation-review/page-001/summary.json \
+  --corrections-root private/book/equation-review/page-001/corrections \
+  --out private/book/renderable-reviewed/page-001.json
+```
+
 ## Dataset Export
 
 ```bash
