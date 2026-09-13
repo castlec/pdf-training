@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -287,9 +288,9 @@ def asset_path(value: str | None, output_path: Path) -> str | None:
     if not path.is_absolute():
         return path.as_posix()
     try:
-        return path.relative_to(output_path.parent.resolve()).as_posix()
+        return os.path.relpath(path, output_path.parent.resolve()).replace(os.sep, "/")
     except ValueError:
-        return path.as_posix()
+        return path.as_uri()
 
 
 def node_text(node: dict[str, Any]) -> str:
@@ -303,10 +304,22 @@ def node_text(node: dict[str, Any]) -> str:
 def render_text_node(node: dict[str, Any]) -> str:
     text = html.escape(node_text(node))
     box = node["bbox"]
+    native_class = " native-text" if node.get("font_size_px") else ""
+    style: list[str] = [box_style(box)]
+    if node.get("font_size_px"):
+        style.append(f'font-size:{float(node["font_size_px"]):g}px')
+    if node.get("font_family"):
+        style.append(f'font-family:{node["font_family"]}')
+    if node.get("font_weight"):
+        style.append(f'font-weight:{html.escape(str(node["font_weight"]))}')
+    if node.get("font_style"):
+        style.append(f'font-style:{html.escape(str(node["font_style"]))}')
+    style.append("line-height:1")
+    style.append("white-space:pre")
     return (
-        f'<div class="node text-node text-{html.escape(str(node.get("class", "body")))}" '
+        f'<div class="node text-node text-{html.escape(str(node.get("class", "body")))}{native_class}" '
         f'data-node-id="{html.escape(str(node["id"]))}" '
-        f'style="{box_style(box)}">{text}</div>'
+        f'style="{";".join(style)}">{text}</div>'
     )
 
 
@@ -391,7 +404,8 @@ body {{ margin: 0; background: var(--review-bg); color: var(--ink); font-family:
 .page {{ position: relative; width: var(--page-w); height: var(--page-h); background: var(--paper); overflow: hidden; }}
 .page-wrap {{ padding: 18px; }}
 .node {{ position: absolute; overflow: visible; }}
-.text-node {{ white-space: pre-wrap; line-height: 1.18; font-size: 30px; }}
+.native-text {{ transform-origin: left top; }}
+.text-node {{ white-space: pre-wrap; line-height: 1.18; font-size: 30px; overflow: visible; }}
 .text-body {{ font-size: 30px; }}
 .text-caption {{ font-size: 24px; text-align: center; }}
 .text-heading, .text-title {{ font-weight: 700; font-size: 42px; }}
@@ -450,6 +464,13 @@ def render_page_html(page: dict[str, Any], output_path: Path, *, show_boxes: boo
   <section class="page" data-page-id="{html.escape(str(page.get("id") or ""))}">
     <div class="render-layer background">{''.join(backgrounds)}</div>
     <div class="render-layer content">{''.join(content)}{''.join(boxes)}</div>
+    <script>
+    document.querySelectorAll('.native-text').forEach((node) => {{
+      const natural = node.scrollWidth;
+      const target = node.getBoundingClientRect().width;
+      if (natural > target && target > 0) node.style.transform = `scaleX(${{target / natural}})`;
+    }});
+    </script>
   </section>
 </main>
 </body>
