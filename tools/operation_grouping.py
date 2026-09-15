@@ -559,7 +559,26 @@ def apply_intrinsic_container_layout(input_data: dict[str, Any], *, options: dic
         result["layout"] = policy
         boxes = [child.get("bbox") for child in content_children if child.get("bbox")]
         existing = result.get("bbox") or {}
-        if boxes:
+        if policy["overlap"] in {"forbidden", "reject"}:
+            for index, left in enumerate(boxes):
+                for right in boxes[index + 1:]:
+                    if (
+                        float(left.get("x", 0)) < float(right.get("x", 0)) + float(right.get("w", 0))
+                        and float(right.get("x", 0)) < float(left.get("x", 0)) + float(left.get("w", 0))
+                        and float(left.get("y", 0)) < float(right.get("y", 0)) + float(right.get("h", 0))
+                        and float(right.get("y", 0)) < float(left.get("y", 0)) + float(left.get("h", 0))
+                    ):
+                        raise ValueError(f"{result.get('id', 'container')}: overlapping children are forbidden")
+        if policy["overflow"] == "reject" and existing:
+            x1, y1 = float(existing.get("x", 0)), float(existing.get("y", 0))
+            x2 = x1 + float(existing.get("w", 0))
+            y2 = y1 + float(existing.get("h", 0))
+            for box in boxes:
+                bx1, by1 = float(box.get("x", 0)), float(box.get("y", 0))
+                bx2, by2 = bx1 + float(box.get("w", 0)), by1 + float(box.get("h", 0))
+                if bx1 < x1 or by1 < y1 or bx2 > x2 or by2 > y2:
+                    raise ValueError(f"{result.get('id', 'container')}: child overflows fixed bounds")
+        if boxes and policy["sizing"] == "intrinsic" and policy["overflow"] == "grow":
             grown = _union_boxes([existing] + boxes)
         else:
             grown = copy.deepcopy(existing)
@@ -568,6 +587,12 @@ def apply_intrinsic_container_layout(input_data: dict[str, Any], *, options: dic
         grown["w"] = float(grown.get("w", 0)) + default_padding["left"] + default_padding["right"]
         grown["h"] = float(grown.get("h", 0)) + default_padding["top"] + default_padding["bottom"]
         result["bbox"] = grown
+        if result.get("layout_kind") in {"table", "cell"}:
+            result.setdefault("coordinate_space", {
+                "name": "page",
+                "origin": "top-left",
+                "mapping": "absolute",
+            })
         if result.get("layout_kind") == "cell" and frame_children:
             source_ordinals = sorted({
                 int(ordinal)
