@@ -26,6 +26,7 @@
         ]
       }
     },
+    {"id": "layout.intrinsic-container-growth.v1"},
     {"id": "layout.relative-coordinates.v1"},
     {"id": "layout.materialize-operation-tree.v1"}
   ]

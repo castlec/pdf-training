@@ -218,17 +218,24 @@ def render_recursive_operation_groups(pdf: pikepdf.Pdf, page: pikepdf.Page, reso
         result = [pikepdf.ContentStreamInstruction([], pikepdf.Operator("q"))]
         if transform is not None:
             result.append(pikepdf.ContentStreamInstruction(transform, pikepdf.Operator("cm")))
-        visible_ordinals = subtree_owned(group)
-        child_by_start = {child_span[0]: (child, child_span) for child, child_span in children_with_spans(group)}
+        if group.get("render_operations") is not None:
+            for operation in group.get("render_operations") or []:
+                result.append(pikepdf.ContentStreamInstruction([resolver.value(value) for value in operation.get("operands") or []], pikepdf.Operator(str(operation["operator"]))))
+            visible_ordinals: set[int] = set()
+        else:
+            visible_ordinals = subtree_owned(group)
+        child_entries = children_with_spans(group)
+        child_by_start = {child_span[0]: (child, child_span) for child, child_span in child_entries}
+        child_owned = set().union(*(subtree_owned(child) for child, _ in child_entries)) if child_entries else set()
         ordinal = span[0]
         while ordinal <= span[1]:
             child_entry = child_by_start.get(ordinal)
             if child_entry is not None:
                 child, child_span = child_entry
                 result.extend(emit_content(child, child_span))
-                ordinal = child_span[1] + 1
+                ordinal += 1
                 continue
-            if ordinal not in visible_ordinals:
+            if ordinal in child_owned or ordinal not in visible_ordinals:
                 ordinal += 1
                 continue
             operation = by_ordinal.get(ordinal)
@@ -414,14 +421,13 @@ def operation_tree_groups(tree: dict[str, Any]) -> list[dict[str, Any]]:
             for child in node.get("children") or []
             if isinstance(child, dict) and child.get("type") in {"operation_group", "operation_group_reference"}
         ]
-        referenced_ordinals = [
-            int(ordinal)
-            for reference in node.get("references") or []
-            for ordinal in reference.get("source_operation_ordinals") or []
-        ]
         existing_references = [int(ordinal) for ordinal in group.get("source_operation_ordinals") or []]
         group["operation_ordinals"] = direct_ordinals
-        group["source_operation_ordinals"] = sorted(set(existing_references + referenced_ordinals))
+        group["source_operation_ordinals"] = existing_references
+        group["operation_references"] = [
+            {"source_operation_ordinals": [int(ordinal) for ordinal in reference.get("source_operation_ordinals") or []]}
+            for reference in node.get("references") or []
+        ]
         group["children"] = nested
         group.pop("operation_groups", None)
         return group

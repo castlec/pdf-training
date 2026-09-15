@@ -9,6 +9,7 @@ from typing import Any
 TRANSFORM_ID = "geometry.operations-into-groups.v1"
 OPERATION_TREE_TRANSFORM_ID = "layout.materialize-operation-tree.v1"
 ONE_CELL_TABLE_TRANSFORM_ID = "layout.promote-content-groups-to-one-cell-tables.v1"
+INTRINSIC_LAYOUT_TRANSFORM_ID = "layout.intrinsic-container-growth.v1"
 INJECT_TEXT_LINES_TRANSFORM_ID = "evaluation.inject-six-lines-into-first-cell.v1"
 _GEOMETRY_OPS = {"m", "l", "c", "re", "h", "S", "s", "f", "f*", "B", "b"}
 
@@ -513,6 +514,110 @@ def inject_text_lines_into_first_cell(input_data: dict[str, Any], *, options: di
         "count": injected,
     }
     return out
+
+
+def apply_intrinsic_container_layout(input_data: dict[str, Any], *, options: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Grow intrinsic containers from child bounds and replace frame ops with a border realization."""
+    out = copy.deepcopy(input_data)
+    options = options or {}
+    padding = options.get("padding") or {}
+    default_padding = {
+        "left": float(padding.get("left", 0)),
+        "top": float(padding.get("top", 0)),
+        "right": float(padding.get("right", 0)),
+        "bottom": float(padding.get("bottom", 0)),
+    }
+
+    def border_operations(bbox: dict[str, Any], page_height: float) -> list[dict[str, Any]]:
+        x = float(bbox.get("x", 0))
+        y = page_height - float(bbox.get("y", 0)) - float(bbox.get("h", 0))
+        return [
+            {"operator": "q", "operands": []},
+            {"operator": "G", "operands": [0.0]},
+            {"operator": "w", "operands": [0.96]},
+            {"operator": "re", "operands": [x, y, float(bbox.get("w", 0)), float(bbox.get("h", 0))]},
+            {"operator": "S", "operands": []},
+            {"operator": "Q", "operands": []},
+        ]
+
+    def layout_node(node: dict[str, Any], page_height: float) -> dict[str, Any]:
+        result = copy.deepcopy(node)
+        children = [layout_node(child, page_height) for child in _node_children(result)]
+        frame_children = [child for child in children if child.get("role") == "container_border_operation"]
+        content_children = [child for child in children if child.get("role") != "container_border_operation"]
+        result["children"] = content_children
+        result.pop("operation_groups", None)
+        if result.get("layout_kind") not in {"cell", "table"}:
+            if children:
+                result["children"] = children
+            return result
+
+        policy = copy.deepcopy(result.get("layout") or {})
+        policy.setdefault("sizing", "intrinsic")
+        policy.setdefault("overflow", "grow")
+        policy.setdefault("overlap", "allowed")
+        result["layout"] = policy
+        boxes = [child.get("bbox") for child in content_children if child.get("bbox")]
+        existing = result.get("bbox") or {}
+        if boxes:
+            grown = _union_boxes([existing] + boxes)
+        else:
+            grown = copy.deepcopy(existing)
+        grown["x"] = float(grown.get("x", 0)) - default_padding["left"]
+        grown["y"] = float(grown.get("y", 0)) - default_padding["top"]
+        grown["w"] = float(grown.get("w", 0)) + default_padding["left"] + default_padding["right"]
+        grown["h"] = float(grown.get("h", 0)) + default_padding["top"] + default_padding["bottom"]
+        result["bbox"] = grown
+        if result.get("layout_kind") == "cell" and frame_children:
+            source_ordinals = sorted({
+                int(ordinal)
+                for child in frame_children
+                for ordinal in child.get("operation_ordinals") or []
+            })
+            result["children"].insert(0, {
+                "id": f"{result.get('id', 'cell')}::border",
+                "type": "group",
+                "role": "container_border",
+                "bbox": copy.deepcopy(grown),
+                "source_operation_ordinals": source_ordinals,
+                "render_operations": border_operations(grown, page_height),
+                "coordinate_space": {"name": "page", "origin": "top-left", "mapping": "absolute"},
+            })
+        if result.get("layout_kind") == "table":
+            cell_boxes = [child.get("bbox") for child in result["children"] if child.get("layout_kind") == "cell" and child.get("bbox")]
+            if cell_boxes:
+                result["bbox"] = _union_boxes([result["bbox"]] + cell_boxes)
+        return result
+
+    pages = out.get("pages") or []
+    if isinstance(pages, dict):
+        pages = list(pages.values())
+    for page in pages:
+        media_box = page.get("media_box") or {}
+        if isinstance(media_box, dict):
+            media_height = media_box.get("h")
+        elif isinstance(media_box, (list, tuple)) and len(media_box) >= 4:
+            media_height = float(media_box[3]) - float(media_box[1])
+        else:
+            media_height = None
+        page_height = float(page.get("height") or media_height or 841.92)
+        page["operation_groups"] = [layout_node(group, page_height) for group in page.get("operation_groups") or []]
+    out.setdefault("provenance", {})["intrinsic_layout"] = {
+        "transform": INTRINSIC_LAYOUT_TRANSFORM_ID,
+        "sizing": "intrinsic",
+        "overflow": "grow",
+        "overlap": "allowed",
+    }
+    return out
+
+
+def _node_children(node: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        child
+        for key in ("children", "operation_groups")
+        for child in node.get(key) or []
+        if isinstance(child, dict)
+    ]
 
 
 def materialize_operation_tree(input_data: dict[str, Any]) -> dict[str, Any]:
