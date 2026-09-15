@@ -23,6 +23,35 @@ rights are documented.
 - Promote only datasets that pass validation or have documented accepted review
   findings.
 
+## Local Model Access
+
+Projects that use a local Unsloth server should keep tokens in a private shared
+env file, not in the project repo:
+
+```bash
+PDF_TRAINING_SECRETS_ENV="${PDF_TRAINING_SECRETS_ENV:-/path/to/private/secrets.env}"
+set -a
+source "${PDF_TRAINING_SECRETS_ENV}"
+set +a
+```
+
+Use `UNSLOTH_HOST` when the caller can reach the server through localhost. Use
+`UNSLOTH_WSL_HOST` when calling a Windows-hosted Unsloth server from WSL2:
+
+```bash
+python3 tools/equation_review.py build \
+  --input private/book/renderable/page-001.json \
+  --source-base private/book \
+  --report-root private/book/equation-review/page-001 \
+  --provider ollama-chat \
+  --host "${UNSLOTH_WSL_HOST}" \
+  --model default
+```
+
+`UNSLOTH_WSL_HOST` is machine-local and may need updating after WSL or Windows
+network resets. Keep model responses derived from copyrighted pages in the
+private project workspace.
+
 ## Minimal OCR Dataset Chain
 
 Use this when the goal is to train or evaluate OCR models rather than recreate

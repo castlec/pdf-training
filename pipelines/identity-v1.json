@@ -1,0 +1,13 @@
+{
+  "schema": "pdf-training-transform-pipeline-v1",
+  "id": "identity-v1",
+  "description": "Proof-of-concept transform chain that replaces every node with an equivalent new object.",
+  "transforms": [
+    {
+      "id": "identity.v1",
+      "input_schema": "pdf-training-renderable-document-v1",
+      "output_schema": "pdf-training-renderable-document-v1",
+      "preserves": ["node_ids", "text", "bbox", "realization", "resources", "operations"]
+    }
+  ]
+}

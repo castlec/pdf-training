@@ -1,0 +1,13 @@
+{
+  "schema": "pdf-training-transform-pipeline-v1",
+  "id": "project-pdf-ir-v1",
+  "description": "Project faithful PDF IR into a renderable document envelope without semantic interpretation.",
+  "transforms": [
+    {
+      "id": "project.pdf-ir.v1",
+      "input_schema": "pdf-training-pdf-ir-v1",
+      "output_schema": "pdf-training-renderable-dataset-v1",
+      "preserves": ["page_geometry", "operations", "resources", "objects", "stream_bytes"]
+    }
+  ]
+}

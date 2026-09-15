@@ -1,0 +1,22 @@
+{
+  "schema": "pdf-training-pipeline-v1",
+  "id": "realization-validation-v1",
+  "description": "Validate a persisted realization artifact without consulting the source PDF.",
+  "variables": {
+    "INPUT": ""
+  },
+  "stages": [
+    {
+      "id": "validate-realization",
+      "input_schema": "pdf-training-realization-page-v1",
+      "output_schema": "pdf-training-realization-page-v1",
+      "command": [
+        "python3",
+        "-c",
+        "import json, sys; from tools.pdf_realization import validate_page; value=json.load(open(sys.argv[1], encoding='utf-8')); validate_page(value); print('validated', value['id'])",
+        "${INPUT}"
+      ],
+      "required_outputs": []
+    }
+  ]
+}

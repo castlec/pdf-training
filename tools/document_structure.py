@@ -344,8 +344,9 @@ def pages_from_dataset(data: dict[str, Any]) -> list[tuple[list[Any], dict[str, 
 
 def replace_at_path(data: dict[str, Any], path: list[Any], value: dict[str, Any]) -> None:
     if not path:
+        replacement = copy.deepcopy(value)
         data.clear()
-        data.update(value)
+        data.update(replacement)
         return
     target: Any = data
     for part in path[:-1]:
@@ -440,6 +441,114 @@ def build_page_map(input_data: dict[str, Any], *, infer_offset: int | None = Non
     }
 
 
+def group_page_by_whitespace(
+    page: dict[str, Any],
+    *,
+    min_gap: int = 48,
+    gap_height_factor: float = 3.0,
+    min_width_fraction: float = 0.8,
+) -> list[dict[str, Any]]:
+    """Group page nodes using geometry only and retain every source node."""
+    entries = []
+    for node in page.get("nodes") or []:
+        box = node.get("bbox") or {}
+        try:
+            x, y = int(box["x"]), int(box["y"])
+            w, h = int(box["w"]), int(box["h"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if w > 0 and h > 0:
+            entries.append((x, y, w, h, str(node.get("id") or "")))
+    if not entries:
+        return []
+
+    heights = sorted(item[3] for item in entries)
+    median_height = heights[len(heights) // 2]
+    page_x1 = min(item[0] for item in entries)
+    page_x2 = max(item[0] + item[2] for item in entries)
+    occupied_width = max(1, page_x2 - page_x1)
+
+    bands = []
+    for item in sorted(entries, key=lambda value: (value[1], value[0], value[4])):
+        x, y, w, h, node_id = item
+        if bands and y <= bands[-1]["y2"]:
+            band = bands[-1]
+            band["y2"] = max(band["y2"], y + h)
+            band["x1"] = min(band["x1"], x)
+            band["x2"] = max(band["x2"], x + w)
+            band["items"].append(item)
+        else:
+            bands.append({"y1": y, "y2": y + h, "x1": x, "x2": x + w, "items": [item]})
+
+    split_after = set()
+    for index in range(len(bands) - 1):
+        upper, lower = bands[index], bands[index + 1]
+        gap = lower["y1"] - upper["y2"]
+        upper_items = [item for band in bands[: index + 1] for item in band["items"]]
+        lower_items = [item for band in bands[index + 1 :] for item in band["items"]]
+        upper_width = max(item[0] + item[2] for item in upper_items) - min(item[0] for item in upper_items)
+        lower_width = max(item[0] + item[2] for item in lower_items) - min(item[0] for item in lower_items)
+        neighboring_width = min(upper_width, lower_width)
+        if gap >= max(min_gap, median_height * gap_height_factor) and neighboring_width >= occupied_width * min_width_fraction:
+            split_after.add(index)
+
+    groups = []
+    start = 0
+    ends = sorted(split_after)
+    if not ends or ends[-1] != len(bands) - 1:
+        ends.append(len(bands) - 1)
+    for end in ends:
+        selected = bands[start : end + 1]
+        items = [item for band in selected for item in band["items"]]
+        groups.append({
+            "id": f"{page.get('id') or 'page'}-structure-group-{len(groups) + 1:02d}",
+            "rule": "full_width_vertical_whitespace",
+            "bbox": {
+                "x": min(item[0] for item in items),
+                "y": min(item[1] for item in items),
+                "w": max(item[0] + item[2] for item in items) - min(item[0] for item in items),
+                "h": max(item[1] + item[3] for item in items) - min(item[1] for item in items),
+            },
+            "node_ids": [item[4] for item in sorted(items, key=lambda value: (value[1], value[0], value[4]))],
+            "parameters": {
+                "min_gap": min_gap,
+                "gap_height_factor": gap_height_factor,
+                "min_width_fraction": min_width_fraction,
+            },
+        })
+        start = end + 1
+    return groups
+
+
+def apply_whitespace_grouping(
+    input_data: dict[str, Any],
+    *,
+    min_gap: int,
+    gap_height_factor: float,
+    min_width_fraction: float,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    out = copy.deepcopy(input_data)
+    page_stats = []
+    for path, page in pages_from_dataset(out):
+        groups = group_page_by_whitespace(
+            page,
+            min_gap=min_gap,
+            gap_height_factor=gap_height_factor,
+            min_width_fraction=min_width_fraction,
+        )
+        page["structure_groups"] = groups
+        replace_at_path(out, path, page)
+        page_stats.append({"page_id": page.get("id"), "groups": len(groups), "group_node_counts": [len(group["node_ids"]) for group in groups]})
+    report = {
+        "schema": "pdf-training-structural-grouping-report-v1",
+        "rule": "full_width_vertical_whitespace",
+        "pages": len(page_stats),
+        "page_stats": page_stats,
+    }
+    out.setdefault("provenance", {})["structural_grouping"] = report
+    return out, report
+
+
 def render_report_html(report: dict[str, Any]) -> str:
     rows = "".join(
         "<tr>"
@@ -495,11 +604,32 @@ def main() -> int:
     apply_parser.add_argument("--match-threshold", type=float, default=0.78)
     apply_parser.add_argument("--demote-unmatched", action="store_true")
 
+    group_parser = subparsers.add_parser("group", help="Group page nodes using geometry-only rules")
+    group_parser.add_argument("--input", required=True, type=Path)
+    group_parser.add_argument("--out", required=True, type=Path)
+    group_parser.add_argument("--report", type=Path)
+    group_parser.add_argument("--min-gap", type=int, default=48)
+    group_parser.add_argument("--gap-height-factor", type=float, default=3.0)
+    group_parser.add_argument("--min-width-fraction", type=float, default=0.8)
+
     args = parser.parse_args()
     if args.command == "page-map":
         result = build_page_map(load_json(args.input), infer_offset=args.infer_offset)
         write_json(args.out, result)
         print(json.dumps(result["summary"], sort_keys=True))
+        return 0
+
+    if args.command == "group":
+        updated, report = apply_whitespace_grouping(
+            load_json(args.input),
+            min_gap=args.min_gap,
+            gap_height_factor=args.gap_height_factor,
+            min_width_fraction=args.min_width_fraction,
+        )
+        write_json(args.out, updated)
+        if args.report:
+            write_json(args.report, report)
+        print(json.dumps(report, ensure_ascii=False, sort_keys=True))
         return 0
 
     outline_data = load_json(args.outline)

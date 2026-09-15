@@ -192,6 +192,7 @@ def compose_page(
                 "bbox": box.to_dict(),
                 "render_layer": image.get("render_layer", "background"),
                 "transparent_background": bool(image.get("transparent_background", True)),
+                "asset": image.get("asset") or image.get("image_asset") or image.get("crop_asset"),
                 "component_of": image.get("component_of"),
                 "relations": [],
                 "source": {"bbox": box.to_dict()},

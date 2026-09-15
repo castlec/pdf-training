@@ -1,0 +1,741 @@
+"""Group marked geometric PDF operation spans without rasterizing them."""
+
+from __future__ import annotations
+
+import copy
+from typing import Any
+
+
+TRANSFORM_ID = "geometry.operations-into-groups.v1"
+OPERATION_TREE_TRANSFORM_ID = "layout.materialize-operation-tree.v1"
+ONE_CELL_TABLE_TRANSFORM_ID = "layout.promote-content-groups-to-one-cell-tables.v1"
+INJECT_TEXT_LINES_TRANSFORM_ID = "evaluation.inject-six-lines-into-first-cell.v1"
+_GEOMETRY_OPS = {"m", "l", "c", "re", "h", "S", "s", "f", "f*", "B", "b"}
+
+
+def _numbers(operation: dict[str, Any]) -> list[float]:
+    values = []
+    for operand in operation.get("operands") or []:
+        if isinstance(operand, (int, float)):
+            values.append(float(operand))
+    return values
+
+
+def _operation_bbox(operations: list[dict[str, Any]]) -> dict[str, float] | None:
+    points: list[tuple[float, float]] = []
+    for operation in operations:
+        operator = operation.get("operator")
+        values = _numbers(operation)
+        if operator == "re" and len(values) >= 4:
+            x, y, w, h = values[:4]
+            points.extend([(x, y), (x + w, y + h)])
+        elif operator in {"m", "l"} and len(values) >= 2:
+            points.append((values[0], values[1]))
+        elif operator == "c" and len(values) >= 6:
+            points.extend((values[index], values[index + 1]) for index in range(0, 6, 2))
+    if not points:
+        return None
+    x1 = min(point[0] for point in points)
+    y1 = min(point[1] for point in points)
+    x2 = max(point[0] for point in points)
+    y2 = max(point[1] for point in points)
+    return {"x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1}
+
+
+def _marked_geometry_blocks(operations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    blocks = []
+    start = None
+    mcid = None
+    for index, operation in enumerate(operations):
+        if operation.get("operator") == "BDC":
+            operands = operation.get("operands") or []
+            properties = operands[1] if len(operands) > 1 else {}
+            if isinstance(properties, dict) and "/MCID" in properties:
+                start = index
+                mcid = properties["/MCID"]
+        elif operation.get("operator") == "EMC" and start is not None:
+            block_operations = operations[start : index + 1]
+            geometry = [item for item in block_operations if item.get("operator") in _GEOMETRY_OPS]
+            bbox = _operation_bbox(geometry)
+            has_path_geometry = any(item.get("operator") in {"m", "l", "c", "h"} for item in geometry)
+            if bbox and has_path_geometry:
+                blocks.append({"start": start, "end": index, "mcid": mcid, "bbox": bbox})
+            start = None
+            mcid = None
+    return blocks
+
+
+def _union(first: dict[str, float], second: dict[str, float]) -> dict[str, float]:
+    x1 = min(first["x"], second["x"])
+    y1 = min(first["y"], second["y"])
+    x2 = max(first["x"] + first["w"], second["x"] + second["w"])
+    y2 = max(first["y"] + first["h"], second["y"] + second["h"])
+    return {"x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1}
+
+
+def _cluster_blocks(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    clusters = []
+    for block in blocks:
+        if clusters and block["start"] - clusters[-1]["end"] <= 8:
+            cluster = clusters[-1]
+            cluster["end"] = block["end"]
+            cluster["mcids"].append(block["mcid"])
+            cluster["bbox"] = _union(cluster["bbox"], block["bbox"])
+        else:
+            clusters.append({"start": block["start"], "end": block["end"], "mcids": [block["mcid"]], "bbox": block["bbox"]})
+    return [cluster for cluster in clusters if len(cluster["mcids"]) >= 2]
+
+
+def _to_page_bbox(raw: dict[str, float], page: dict[str, Any]) -> dict[str, float]:
+    media = page.get("realization", {}).get("media_box") or {}
+    media_box = page.get("media_box") or []
+    raw_width = float(media.get("w") or (float(media_box[2]) - float(media_box[0]) if len(media_box) >= 4 else 0) or page.get("width") or 1)
+    raw_height = float(media.get("h") or (float(media_box[3]) - float(media_box[1]) if len(media_box) >= 4 else 0) or page.get("height") or 1)
+    width = float(page.get("width") or raw_width)
+    height = float(page.get("height") or raw_height)
+    return {"x": raw["x"] * width / raw_width, "y": (raw_height - raw["y"] - raw["h"]) * height / raw_height, "w": raw["w"] * width / raw_width, "h": raw["h"] * height / raw_height}
+
+
+def _contains(outer: dict[str, Any], inner: dict[str, float]) -> bool:
+    box = outer.get("bbox") or {}
+    return box.get("x", 0) <= inner["x"] and box.get("y", 0) <= inner["y"] and box.get("x", 0) + box.get("w", 0) >= inner["x"] + inner["w"] and box.get("y", 0) + box.get("h", 0) >= inner["y"] + inner["h"]
+
+
+def _raw_frame_candidates(page: dict[str, Any]) -> list[dict[str, Any]]:
+    operations = page.get("operations") or (page.get("realization") or {}).get("operations") or []
+    frames = []
+    horizontal = []
+    vertical = []
+    for operation in operations:
+        if operation.get("operator") != "re":
+            continue
+        values = operation.get("operands") or []
+        if len(values) < 4:
+            continue
+        item = {"ordinal": int(operation.get("ordinal", 0)), "x": float(values[0]), "y": float(values[1]), "w": float(values[2]), "h": float(values[3])}
+        if item["w"] > 300 and item["h"] <= 2:
+            horizontal.append(item)
+        elif item["w"] <= 2 and item["h"] > 10:
+            vertical.append(item)
+    for top in horizontal:
+        for bottom in horizontal:
+            if top["ordinal"] >= bottom["ordinal"] or abs(top["x"] - bottom["x"]) > 2 or abs(top["w"] - bottom["w"]) > 2:
+                continue
+            if top["y"] <= bottom["y"] or top["y"] - bottom["y"] < 10:
+                continue
+            matching_vertical = [item for item in vertical if abs(item["x"] - bottom["x"]) <= 2 or abs(item["x"] + item["w"] - (bottom["x"] + bottom["w"])) <= 2]
+            if not any(abs(item["y"] - bottom["y"]) <= 2 and item["y"] + item["h"] <= top["y"] + top["h"] for item in matching_vertical):
+                continue
+            frames.append({"source_bbox": {"x": bottom["x"], "y": bottom["y"], "w": bottom["w"], "h": top["y"] + top["h"] - bottom["y"]}, "border_operations": [bottom["ordinal"], top["ordinal"]]})
+    return frames
+
+
+def apply_operation_grouping(input_data: dict[str, Any]) -> dict[str, Any]:
+    """Create real containers and attach geometric operation spans beneath them."""
+    out = copy.deepcopy(input_data)
+    pages = out.get("pages") or []
+    if isinstance(pages, dict):
+        pages = list(pages.values())
+    if not pages:
+        pages = [page for document in out.get("documents") or [] for page in document.get("pages") or []]
+    total = 0
+    for page in pages:
+        realization = page.get("realization") or {}
+        operations = realization.get("operations") or page.get("operations") or []
+        clusters = _cluster_blocks(_marked_geometry_blocks(operations))
+        page["operation_groups"] = []
+        containers = []
+        for frame_index, frame in enumerate(_raw_frame_candidates(page), start=1):
+            frame_box = _to_page_bbox(frame["source_bbox"], page)
+            sections = [section for section in page.get("group_tree") or [] if _contains(section, frame_box) or (
+                section["bbox"].get("x", 0) <= frame_box.get("x", 0)
+                and section["bbox"].get("x", 0) + section["bbox"].get("w", 0) >= frame_box.get("x", 0) + frame_box.get("w", 0)
+                and frame_box.get("y", 0) >= section["bbox"].get("y", 0) - 2
+                and frame_box.get("y", 0) + frame_box.get("h", 0) <= section["bbox"].get("y", 0) + section["bbox"].get("h", 0) + 2
+            )]
+            if not sections:
+                continue
+            section = min(sections, key=lambda candidate: candidate["bbox"]["w"] * candidate["bbox"]["h"])
+            container = {"id": f"{page.get('id') or 'page'}-geometry-container-{frame_index:02d}", "type": "group", "role": "geometry_container", "bbox": frame_box, "source_bbox": frame["source_bbox"], "border_operations": frame["border_operations"], "children": []}
+            section.setdefault("children", []).append(container)
+            containers.append(container)
+        for index, cluster in enumerate(clusters, start=1):
+            page_box = _to_page_bbox(cluster["bbox"], page)
+            group = {"id": f"{page.get('id') or 'page'}-geometry-{index:02d}", "type": "draw_group", "role": "geometric_construct", "bbox": page_box, "source_bbox": cluster["bbox"], "operation_ordinals": [int(operations[item]["ordinal"]) for item in range(cluster["start"], cluster["end"] + 1)], "mcids": cluster["mcids"], "source_space": "pdf-user-space"}
+            page["operation_groups"].append(group)
+            parents = [candidate for candidate in containers if _contains(candidate, page_box)]
+            if not parents:
+                parents = [candidate for candidate in page.get("group_tree") or [] if _contains(candidate, page_box)]
+            if parents:
+                parent = min(parents, key=lambda candidate: candidate["bbox"]["w"] * candidate["bbox"]["h"])
+                page_width = float(page.get("width") or 1)
+                page_height = float(page.get("height") or 1)
+                raw_width = float((page.get("realization") or {}).get("media_box", {}).get("w") or page_width)
+                raw_height = float((page.get("realization") or {}).get("media_box", {}).get("h") or page_height)
+                parent_box = parent.get("bbox") or {}
+                group["parent_context_bbox"] = copy.deepcopy(parent_box)
+                group["parent_context_bbox_pdf"] = {
+                    "x": float(parent_box.get("x", 0)) * raw_width / page_width,
+                    "y": float(parent_box.get("y", 0)) * raw_height / page_height,
+                    "w": float(parent_box.get("w", 0)) * raw_width / page_width,
+                    "h": float(parent_box.get("h", 0)) * raw_height / page_height,
+                }
+                group["relative_offset_pdf"] = {
+                    "x": float(page_box.get("x", 0)) * raw_width / page_width - group["parent_context_bbox_pdf"]["x"],
+                    "y": float(page_box.get("y", 0)) * raw_height / page_height - group["parent_context_bbox_pdf"]["y"],
+                }
+                parent.setdefault("operation_groups", []).append(copy.deepcopy(group))
+                parent.setdefault("children", []).append(copy.deepcopy(group))
+                if parent in containers:
+                    parent["container_role"] = "geometric_parent"
+            else:
+                raise ValueError(f"geometric group {group['id']} has no enclosing semantic group")
+            total += 1
+    out.setdefault("provenance", {})["operation_grouping"] = {"transform": TRANSFORM_ID, "pages": len(pages), "groups": total}
+    return out
+
+
+TEXT_ASSOCIATION_TRANSFORM_ID = "layout.associate-text-operations.v1"
+
+
+def _text_operation_candidates(page: dict[str, Any]) -> list[dict[str, Any]]:
+    operations = page.get("operations") or (page.get("realization") or {}).get("operations") or []
+    media_box = page.get("media_box") or []
+    page_height = float(page.get("height") or (media_box[3] - media_box[1] if len(media_box) >= 4 else 0))
+    candidates = []
+    text_start = None
+    marked_start = None
+    text_matrix = None
+    font_size = 12.0
+    for operation in operations:
+        operator = operation.get("operator")
+        ordinal = int(operation.get("ordinal", 0))
+        if operator == "BDC":
+            marked_start = ordinal
+        elif operator == "BT":
+            text_start = ordinal
+            text_matrix = None
+        elif operator == "Tf":
+            values = operation.get("operands") or []
+            if len(values) >= 2:
+                font_size = float(values[1])
+        elif operator == "Tm":
+            values = operation.get("operands") or []
+            if len(values) >= 6:
+                text_matrix = values
+        elif operator in {"Tj", "TJ"} and text_start is not None and text_matrix is not None:
+            values = operation.get("operands") or []
+            payload = values[0] if operator == "Tj" and values else values[0] if values else []
+            strings = payload if isinstance(payload, list) else [payload]
+            length = sum(len(item.get("value", "")) for item in strings if isinstance(item, dict))
+            width = max(font_size * 0.5, length * font_size * 0.5)
+            candidates.append({"operation_ordinal": ordinal, "text_span": [marked_start if marked_start is not None else text_start, ordinal], "bbox": {"x": float(text_matrix[4]), "y": page_height - float(text_matrix[5]) - font_size, "w": width, "h": font_size}})
+        elif operator == "ET":
+            text_start = None
+            text_matrix = None
+        elif operator == "EMC":
+            marked_start = None
+    return candidates
+
+
+def associate_text_operations(input_data: dict[str, Any], *, options: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Attach located PDF text operations to their enclosing geometric groups."""
+    out = copy.deepcopy(input_data)
+    options = options or {}
+    span = options.get("collision_span") or {}
+    left, right = float(span.get("left", 0)), float(span.get("right", 0))
+    top, bottom = float(span.get("top", 0)), float(span.get("bottom", 0))
+    pages = out.get("pages") or []
+    if isinstance(pages, dict):
+        pages = list(pages.values())
+    associated = 0
+    for page in pages:
+        candidates = _text_operation_candidates(page)
+        groups = []
+
+        def collect(value: Any) -> None:
+            if not isinstance(value, dict):
+                return
+            if value.get("role") == "geometric_construct":
+                groups.append(value)
+            for child in value.get("children") or []:
+                collect(child)
+            for child in value.get("operation_groups") or []:
+                collect(child)
+
+        page_groups = page.get("operation_groups") or []
+        for group in page_groups:
+            collect(group)
+        for group in groups:
+            box = group.get("bbox") or {}
+            envelope = {"x": box.get("x", 0) - left, "y": box.get("y", 0) - top, "w": box.get("w", 0) + left + right, "h": box.get("h", 0) + top + bottom}
+            for candidate in candidates:
+                text_box = candidate["bbox"]
+                if not _contains({"bbox": envelope}, text_box) and not _contains({"bbox": text_box}, box):
+                    continue
+                node = {"id": f"{group.get('id')}-text-{candidate['operation_ordinal']}", "type": "text_realization", "role": "associated_text", "bbox": text_box, "source_operation_ordinals": candidate["text_span"], "coordinate_space": "page", "render_mode": "source_operation_reference"}
+                existing = {item.get("id") for item in group.get("children") or [] if isinstance(item, dict)}
+                if node["id"] in existing:
+                    continue
+                group.setdefault("children", []).append(node)
+                group.setdefault("text_operation_references", []).append(node["id"])
+                associated += 1
+    out.setdefault("provenance", {})["text_operation_association"] = {"transform": TEXT_ASSOCIATION_TRANSFORM_ID, "associated": associated, "collision_span": span}
+    return out
+
+
+CONTENT_GROUP_TRANSFORM_ID = "layout.expand-associated-content.v1"
+
+
+def _union_boxes(boxes: list[dict[str, Any]]) -> dict[str, float]:
+    x1 = min(float(box["x"]) for box in boxes)
+    y1 = min(float(box["y"]) for box in boxes)
+    x2 = max(float(box["x"]) + float(box["w"]) for box in boxes)
+    y2 = max(float(box["y"]) + float(box["h"]) for box in boxes)
+    return {"x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1}
+
+
+def operation_group_ownership_diagnostics(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Report overlapping sibling operation spans that cannot form a render tree."""
+    diagnostics: list[dict[str, Any]] = []
+
+    def span(group: dict[str, Any]) -> tuple[int, int] | None:
+        if group.get("role") == "associated_text" and not group.get("operation_ordinals"):
+            return None
+        ordinals = [int(value) for value in group.get("operation_ordinals") or []]
+        ordinals.extend(int(value) for value in group.get("source_operation_ordinals") or [])
+        children = (group.get("children") or []) + (group.get("operation_groups") or [])
+        child_spans = [span(child) for child in children if isinstance(child, dict)]
+        ordinals.extend(value for child_span in child_spans if child_span is not None for value in child_span)
+        return (min(ordinals), max(ordinals)) if ordinals else None
+
+    def visit(parent_id: str | None, siblings: list[dict[str, Any]]) -> None:
+        entries = [(group, span(group)) for group in siblings]
+        for index, (left, left_span) in enumerate(entries):
+            if left_span is None:
+                continue
+            for right, right_span in entries[index + 1:]:
+                if right_span is None or left_span[1] < right_span[0] or right_span[1] < left_span[0]:
+                    continue
+                diagnostics.append({
+                    "kind": "overlapping_sibling_operation_spans",
+                    "parent_id": parent_id,
+                    "left_id": left.get("id"),
+                    "left_span": list(left_span),
+                    "right_id": right.get("id"),
+                    "right_span": list(right_span),
+                })
+        for group in siblings:
+            children = [child for child in (group.get("children") or []) + (group.get("operation_groups") or []) if isinstance(child, dict)]
+            visit(str(group.get("id")) if group.get("id") is not None else None, children)
+
+    visit(None, groups)
+    return diagnostics
+
+
+def promote_content_groups_to_one_cell_tables(input_data: dict[str, Any]) -> dict[str, Any]:
+    """Replace each content group with a recursive one-cell table group."""
+    out = copy.deepcopy(input_data)
+    pages = out.get("pages") or []
+    if isinstance(pages, dict):
+        pages = list(pages.values())
+    promoted = 0
+    replaced_ids: list[str] = []
+    frame_by_geometry_id: dict[str, dict[str, Any]] = {}
+
+    def collect_frames(value: Any, frame: dict[str, Any] | None = None) -> None:
+        if not isinstance(value, dict):
+            return
+        current_frame = value if value.get("role") == "geometry_container" else frame
+        if current_frame is not None and value.get("role") == "geometric_construct" and value.get("id"):
+            frame_by_geometry_id[str(value["id"])] = current_frame
+        for key in ("children", "operation_groups"):
+            for child in value.get(key) or []:
+                collect_frames(child, current_frame)
+
+    for page in pages:
+        for root in page.get("group_tree") or []:
+            collect_frames(root)
+
+    def transform_children(children: list[Any]) -> list[Any]:
+        return [transform_node(child) for child in children]
+
+    def transform_node(value: Any) -> Any:
+        nonlocal promoted
+        if not isinstance(value, dict):
+            return value
+        if value.get("role") != "content_group" or value.get("layout_kind"):
+            result = copy.deepcopy(value)
+            if "children" in result:
+                result["children"] = transform_children(result.get("children") or [])
+            if "operation_groups" in result:
+                result["operation_groups"] = transform_children(result.get("operation_groups") or [])
+            return result
+
+        original = copy.deepcopy(value)
+        group_id = str(original.get("id") or f"content-group-{promoted + 1}")
+        child_values = transform_children(
+            (original.get("children") or []) + (original.get("operation_groups") or [])
+        )
+        table = {
+            key: copy.deepcopy(item)
+            for key, item in original.items()
+            if key not in {"children", "operation_groups", "operation_ordinals", "source_operation_ordinals"}
+        }
+        frame = None
+        for child in child_values:
+            if isinstance(child, dict) and child.get("role") == "geometric_construct":
+                frame = frame_by_geometry_id.get(str(child.get("id")))
+                if frame is not None:
+                    break
+        table_bbox = copy.deepcopy(original.get("bbox") or {})
+        if frame is not None and frame.get("bbox"):
+            table_bbox = _union_boxes([table_bbox, frame["bbox"]])
+        table.update({
+            "id": group_id,
+            "type": "group",
+            "role": "content_group",
+            "layout_kind": "table",
+            "bbox": table_bbox,
+            "children": [],
+            "owned_operation_ordinals": [int(ordinal) for ordinal in (frame or {}).get("border_operations") or []],
+            "container_border": {"kind": "source-frame", "stroke_width": 0.96} if frame is not None else None,
+        })
+        cell = {
+            key: copy.deepcopy(item)
+            for key, item in original.items()
+            if key not in {"children", "operation_groups", "operation_ordinals", "source_operation_ordinals"}
+        }
+        cell.update({
+            "id": f"{group_id}::cell",
+            "type": "group",
+            "role": "content_group",
+            "layout_kind": "cell",
+            "bbox": copy.deepcopy(table_bbox),
+            "children": child_values,
+        })
+        table["children"] = [cell]
+        promoted += 1
+        replaced_ids.append(group_id)
+        return table
+
+    for page in pages:
+        if "group_tree" in page:
+            page["group_tree"] = transform_children(page.get("group_tree") or [])
+        if "operation_groups" in page:
+            page["operation_groups"] = transform_children(page.get("operation_groups") or [])
+    out.setdefault("provenance", {})["one_cell_tables"] = {
+        "transform": ONE_CELL_TABLE_TRANSFORM_ID,
+        "groups_replaced": promoted,
+        "replaced_group_ids": replaced_ids,
+    }
+    return out
+
+
+def inject_text_lines_into_first_cell(input_data: dict[str, Any], *, options: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Add declared test text operations to the first table cell on one page."""
+    out = copy.deepcopy(input_data)
+    options = options or {}
+    target_page = str(options.get("page_id") or "page-004")
+    lines = [str(line) for line in options.get("lines") or [
+        "Synthetic line 1",
+        "Synthetic line 2",
+        "Synthetic line 3",
+        "Synthetic line 4",
+        "Synthetic line 5",
+        "Synthetic line 6",
+    ]]
+    if len(lines) != 6:
+        raise ValueError("evaluation text injection requires exactly six lines")
+    injected = 0
+    for page in out.get("pages") or []:
+        if str(page.get("id")) != target_page:
+            continue
+        groups = page.get("operation_groups") or []
+        table = next((group for group in groups if group.get("layout_kind") == "table"), None)
+        if table is None or not table.get("children"):
+            raise ValueError(f"page {target_page} has no one-cell table group")
+        cell = table["children"][0]
+        bbox = cell.get("bbox") or {}
+        page_height = float(page.get("height") or 841.92)
+        start_top = float(bbox.get("y", 0)) + float(bbox.get("h", 0)) + 8.0
+        line_height = 14.0
+        x = float(bbox.get("x", 0)) + 4.0
+        next_ordinal = max((int(operation["ordinal"]) for operation in page.get("operations") or []), default=-1) + 1
+        ordinals = []
+        for index, line in enumerate(lines):
+            top = start_top + index * line_height
+            pdf_y = page_height - top - 10.0
+            for operator, operands in (
+                ("BT", []),
+                ("Tf", [{"type": "name", "value": "/F1"}, 12]),
+                ("Tm", [1, 0, 0, 1, x, pdf_y]),
+                ("Tj", [{"type": "string", "value": line}]),
+                ("ET", []),
+            ):
+                ordinal = next_ordinal
+                next_ordinal += 1
+                page.setdefault("operations", []).append({"ordinal": ordinal, "operator": operator, "operands": operands})
+                ordinals.append(ordinal)
+        structured = page.get("structured_operations") or {}
+        structured_children = structured.get("children") if isinstance(structured, dict) else None
+        if not isinstance(structured_children, list):
+            raise ValueError(f"page {target_page} has no structured operation children")
+        effective_state = copy.deepcopy(structured_children[-1].get("effective_state", {})) if structured_children else {}
+        for operation in page["operations"][-len(ordinals):]:
+            structured_children.append({
+                "type": "operation",
+                "source_ordinal": int(operation["ordinal"]),
+                "operator": operation["operator"],
+                "operands": copy.deepcopy(operation.get("operands") or []),
+                "effective_state": copy.deepcopy(effective_state),
+            })
+        cell.setdefault("operation_ordinals", []).extend(ordinals)
+        added_height = len(lines) * line_height + 8.0
+        expanded = {"x": float(bbox.get("x", 0)), "y": float(bbox.get("y", 0)), "w": float(bbox.get("w", 0)), "h": float(bbox.get("h", 0)) + added_height}
+        cell["bbox"] = expanded
+        table["bbox"] = copy.deepcopy(expanded)
+        injected = len(lines)
+        break
+    if injected != 6:
+        raise ValueError(f"target page {target_page} was not found")
+    out.setdefault("provenance", {})["injected_text_lines"] = {
+        "transform": INJECT_TEXT_LINES_TRANSFORM_ID,
+        "page_id": target_page,
+        "lines": lines,
+        "count": injected,
+    }
+    return out
+
+
+def materialize_operation_tree(input_data: dict[str, Any]) -> dict[str, Any]:
+    """Materialize operation ownership as a recursive tree without changing raw operations."""
+    out = copy.deepcopy(input_data)
+    pages = out.get("pages") or []
+    if isinstance(pages, dict):
+        pages = list(pages.values())
+    materialized = 0
+    for page in pages:
+        operations = page.get("operations") or (page.get("realization") or {}).get("operations") or []
+        structured = page.get("structured_operations")
+        if not structured:
+            raise ValueError(f"page {page.get('id')} has no structured_operations")
+        from tools.extract_pdf_ir import validate_operation_parity
+        parity_errors = validate_operation_parity(structured, operations)
+        if parity_errors:
+            raise ValueError(f"page {page.get('id')} structured parity failure: {'; '.join(parity_errors)}")
+        groups = page.get("operation_groups") or []
+        ownership_errors = operation_group_ownership_diagnostics(groups)
+        if ownership_errors:
+            raise ValueError(f"page {page.get('id')} has invalid operation ownership: {ownership_errors}")
+        by_ordinal = {int(item["ordinal"]): item for item in operations}
+        claimed: set[int] = set()
+        seen_groups: set[str] = set()
+
+        def build(group: dict[str, Any]) -> tuple[dict[str, Any], set[int], int | None]:
+            group_id = str(group.get("id") or f"anonymous-{len(seen_groups)}")
+            if group_id in seen_groups:
+                raise ValueError(f"page {page.get('id')} repeats operation group {group_id}")
+            seen_groups.add(group_id)
+            child_groups: list[dict[str, Any]] = []
+            references: list[dict[str, Any]] = []
+            reference_nodes: list[tuple[int, dict[str, Any]]] = []
+            for child in (group.get("children") or []) + (group.get("operation_groups") or []):
+                if not isinstance(child, dict):
+                    continue
+                if child.get("role") == "associated_text":
+                    reference = copy.deepcopy(child)
+                    references.append(reference)
+                    source_ordinals = [int(value) for value in reference.get("source_operation_ordinals") or []]
+                    if source_ordinals:
+                        reference_nodes.append((
+                            min(source_ordinals),
+                            {
+                                "type": "operation_group_reference",
+                                "id": str(reference.get("id") or f"reference-{min(source_ordinals)}"),
+                                "group": reference,
+                                "children": [],
+                                "references": [],
+                            },
+                        ))
+                elif child.get("type") in {"group", "draw_group"} or child.get("operation_ordinals"):
+                    child_groups.append(child)
+            child_nodes: list[tuple[int, dict[str, Any]]] = []
+            child_owned: set[int] = set()
+            for child in child_groups:
+                node, owned, first = build(child)
+                child_owned.update(owned)
+                if first is not None:
+                    child_nodes.append((first, node))
+            direct = {int(value) for value in group.get("operation_ordinals") or []}
+            duplicate = direct & child_owned
+            if duplicate:
+                raise ValueError(f"operation group {group_id} claims child ordinals {sorted(duplicate)}")
+            unknown = direct - set(by_ordinal)
+            if unknown:
+                raise ValueError(f"operation group {group_id} references unknown ordinals {sorted(unknown)}")
+            owned = direct | child_owned
+            duplicate_global = claimed & direct
+            if duplicate_global:
+                raise ValueError(f"operation ownership repeats ordinals {sorted(duplicate_global)}")
+            claimed.update(direct)
+            group_meta = copy.deepcopy(group)
+            group_meta.pop("children", None)
+            group_meta.pop("operation_groups", None)
+            operation_nodes = [(ordinal, {"type": "operation", "source_ordinal": ordinal}) for ordinal in sorted(direct)]
+            node_children = [item for _, item in sorted([*operation_nodes, *child_nodes, *reference_nodes], key=lambda item: item[0])]
+            node = {"type": "operation_group", "id": group_id, "group": group_meta, "children": node_children, "references": references}
+            first = min(owned) if owned else None
+            return node, owned, first
+
+        root_nodes: list[tuple[int, dict[str, Any]]] = []
+        for group in groups:
+            node, _, first = build(group)
+            if first is not None:
+                root_nodes.append((first, node))
+        unowned = [(int(item["ordinal"]), {"type": "operation", "source_ordinal": int(item["ordinal"])}) for item in operations if int(item["ordinal"]) not in claimed]
+        children = [node for _, node in sorted([*root_nodes, *unowned], key=lambda item: item[0])]
+        page["operation_tree"] = {"schema": "pdf-training-operation-tree-v1", "children": children}
+        materialized += 1
+    out.setdefault("provenance", {})["operation_tree"] = {"transform": OPERATION_TREE_TRANSFORM_ID, "pages": materialized}
+    return out
+
+
+def expand_associated_content(input_data: dict[str, Any], *, options: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Wrap geometry and associated text in an expanded content group."""
+    out = copy.deepcopy(input_data)
+    pages = out.get("pages") or []
+    if isinstance(pages, dict):
+        pages = list(pages.values())
+    created = 0
+    ownership_diagnostics: dict[str, list[dict[str, Any]]] = {}
+    for page in pages:
+        groups = page.get("operation_groups") or []
+        replacement = []
+        for group in groups:
+            text_nodes = [node for node in group.get("children") or [] if node.get("role") == "associated_text"]
+            boxes = [group.get("bbox") or {}] + [node.get("bbox") or {} for node in text_nodes]
+            if not text_nodes or not all(all(key in box for key in ("x", "y", "w", "h")) for box in boxes):
+                replacement.append(group)
+                continue
+            content_box = _union_boxes(boxes)
+            text_children = [copy.deepcopy(node) for node in text_nodes]
+            content_group = copy.deepcopy(group)
+            content_group["children"] = [
+                child for child in content_group.get("children") or []
+                if child.get("role") != "associated_text"
+            ]
+            wrapper = {
+                "id": f"{group.get('id')}-content",
+                "type": "group",
+                "role": "content_group",
+                "bbox": content_box,
+                "children": [content_group, *text_children],
+                "content_bbox": copy.deepcopy(content_box),
+                "source_group_id": group.get("id"),
+            }
+            old_parent = group.get("parent_context_bbox_pdf") or {}
+            media = page.get("media_box") or []
+            page_width = float(page.get("width") or (media[2] - media[0] if len(media) >= 4 else 1))
+            page_height = float(page.get("height") or (media[3] - media[1] if len(media) >= 4 else 1))
+            raw_width = float(media[2] - media[0]) if len(media) >= 4 else page_width
+            raw_height = float(media[3] - media[1]) if len(media) >= 4 else page_height
+            wrapper["parent_context_bbox_pdf"] = copy.deepcopy(old_parent)
+            wrapper["relative_offset_pdf"] = {
+                "x": float(content_box["x"]) * raw_width / page_width - float(old_parent.get("x", 0)),
+                "y": float(content_box["y"]) * raw_height / page_height - float(old_parent.get("y", 0)),
+            }
+            content_group["parent_context_bbox_pdf"] = {"x": float(content_box["x"]) * raw_width / page_width, "y": float(content_box["y"]) * raw_height / page_height, "w": float(content_box["w"]) * raw_width / page_width, "h": float(content_box["h"]) * raw_height / page_height}
+            content_group["relative_offset_pdf"] = {"x": (float(content_group["bbox"]["x"]) - float(content_box["x"])) * raw_width / page_width, "y": (float(content_group["bbox"]["y"]) - float(content_box["y"])) * raw_height / page_height}
+            replacement.append(wrapper)
+            created += 1
+        page["operation_groups"] = replacement
+        page_id = str(page.get("id") or f"page-{len(ownership_diagnostics) + 1:03d}")
+        ownership_diagnostics[page_id] = operation_group_ownership_diagnostics(replacement)
+    out.setdefault("provenance", {})["content_group"] = {
+        "transform": CONTENT_GROUP_TRANSFORM_ID,
+        "created": created,
+        "ownership_diagnostics": ownership_diagnostics,
+    }
+    return out
+
+
+ORIGIN_PROOF_TRANSFORM_ID = "geometry.move-groups-to-parent-origin.v1"
+
+
+def move_groups_to_parent_origin(input_data: dict[str, Any], *, options: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Move localized groups and their associated text placements to parent origin."""
+    out = copy.deepcopy(input_data)
+    pages = out.get("pages") or []
+    if isinstance(pages, dict):
+        pages = list(pages.values())
+    options = options or {}
+    target_group_ids = {str(value) for value in options.get("group_ids") or []}
+    moved_text = 0
+    for page in pages:
+        operations = page.get("operations") or []
+
+        def visit(group: dict[str, Any], inside_moved_container: bool = False) -> None:
+            nonlocal moved_text
+            is_content_container = (
+                group.get("role") == "content_group"
+                and (not target_group_ids or str(group.get("id")) in target_group_ids)
+            )
+            if is_content_container:
+                original_offset = copy.deepcopy(group.get("relative_offset_pdf") or {"x": 0.0, "y": 0.0})
+                group["original_relative_offset_pdf"] = original_offset
+                group["relative_offset_pdf"] = {"x": 0.0, "y": 0.0}
+                group["render_transform"] = [
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    -float(original_offset.get("x", 0.0)),
+                    float(original_offset.get("y", 0.0)),
+                ]
+                group["placement_mode"] = "parent-origin-proof"
+            elif group.get("operations_localized") and not inside_moved_container and not target_group_ids:
+                original_offset = copy.deepcopy(group.get("relative_offset_pdf") or {"x": 0.0, "y": 0.0})
+                group["original_relative_offset_pdf"] = original_offset
+                group["relative_offset_pdf"] = {"x": 0.0, "y": 0.0}
+                group["placement_mode"] = "parent-origin-proof"
+                dx = float(original_offset.get("x", 0.0))
+                dy = float(original_offset.get("y", 0.0))
+                seen = set()
+                for node in group.get("children") or []:
+                    if node.get("role") != "associated_text":
+                        continue
+                    span = [int(value) for value in node.get("source_operation_ordinals") or []]
+                    if len(span) < 2:
+                        continue
+                    start, end = min(span), max(span)
+                    for operation in operations:
+                        operation_ordinal = int(operation.get("ordinal", -1))
+                        if operation_ordinal < start or operation_ordinal > end or operation_ordinal in seen:
+                            continue
+                        operands = operation.get("operands") or []
+                        if operation.get("operator") == "Tm" and len(operands) >= 6:
+                            operation.setdefault("original_operands", copy.deepcopy(operands))
+                            operands[4] = float(operands[4]) - dx
+                            operands[5] = float(operands[5]) + dy
+                            seen.add(operation_ordinal)
+                            moved_text += 1
+                        elif operation.get("operator") == "re" and len(operands) >= 4:
+                            operation.setdefault("original_operands", copy.deepcopy(operands))
+                            operands[0] = float(operands[0]) - dx
+                            operands[1] = float(operands[1]) + dy
+                            seen.add(operation_ordinal)
+            children = (group.get("children") or []) + (group.get("operation_groups") or [])
+            for child in children:
+                if isinstance(child, dict):
+                    visit(child, inside_moved_container or is_content_container)
+
+        for group in page.get("operation_groups") or []:
+            visit(group)
+
+    out.setdefault("provenance", {})["move_groups_to_parent_origin"] = {
+        "transform": ORIGIN_PROOF_TRANSFORM_ID,
+        "text_matrices_moved": moved_text,
+        "group_ids": sorted(target_group_ids) if target_group_ids else "all_content_groups",
+    }
+    return out

@@ -1,0 +1,6 @@
+{
+  "schema": "pdf-training-transform-pipeline-v1",
+  "id": "empty-v1",
+  "description": "Baseline extraction and rendering with no transforms.",
+  "transforms": []
+}

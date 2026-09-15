@@ -1,0 +1,32 @@
+{
+  "schema": "pdf-training-transform-pipeline-v1",
+  "id": "group-horizontal-relative-debug-origin-v1",
+  "transforms": [
+    {"id": "group.horizontal-rules.v1"},
+    {"id": "geometry.operations-into-groups.v1"},
+    {
+      "id": "layout.associate-text-operations.v1",
+      "options": {
+        "collision_span": {"left": 40, "right": 24, "top": 24, "bottom": 24, "units": "pdf-user-space"}
+      }
+    },
+    {"id": "layout.expand-associated-content.v1"},
+    {"id": "layout.promote-content-groups-to-one-cell-tables.v1"},
+    {
+      "id": "evaluation.inject-six-lines-into-first-cell.v1",
+      "options": {
+        "page_id": "page-004",
+        "lines": [
+          "Synthetic line 1",
+          "Synthetic line 2",
+          "Synthetic line 3",
+          "Synthetic line 4",
+          "Synthetic line 5",
+          "Synthetic line 6"
+        ]
+      }
+    },
+    {"id": "layout.relative-coordinates.v1"},
+    {"id": "layout.materialize-operation-tree.v1"}
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "schema": "pdf-training-transform-pipeline-v1",
+  "id": "origin-proof-v1",
+  "transforms": [
+    {"id": "group.horizontal-rules.v1"},
+    {"id": "geometry.operations-into-groups.v1"},
+    {
+      "id": "layout.associate-text-operations.v1",
+      "options": {
+        "collision_span": {"left": 40, "right": 24, "top": 24, "bottom": 24, "units": "pdf-user-space"}
+      }
+    },
+    {"id": "geometry.localize-operation-groups.v1"},
+    {"id": "geometry.move-groups-to-parent-origin.v1"},
+    {"id": "layout.relative-coordinates.v1"}
+  ]
+}

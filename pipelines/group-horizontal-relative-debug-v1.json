@@ -1,0 +1,18 @@
+{
+  "schema": "pdf-training-transform-pipeline-v1",
+  "id": "group-horizontal-relative-debug-v1",
+  "transforms": [
+    {"id": "group.horizontal-rules.v1"},
+    {"id": "geometry.operations-into-groups.v1"},
+    {
+      "id": "layout.associate-text-operations.v1",
+      "options": {
+        "collision_span": {"left": 24, "right": 12, "top": 12, "bottom": 12, "units": "pdf-user-space"}
+      }
+    },
+    {"id": "layout.expand-associated-content.v1"},
+    {"id": "layout.relative-coordinates.v1"},
+    {"id": "debug.visualize-groups.v1"},
+    {"id": "layout.materialize-operation-tree.v1"}
+  ]
+}

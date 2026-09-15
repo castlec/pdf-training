@@ -79,6 +79,14 @@ class RenderPageHtmlTests(unittest.TestCase):
         self.assertIn("missing-asset", html)
         self.assertIn("review-box", html)
 
+    def test_render_text_uses_native_style_overrides(self):
+        page = self.sample_page()
+        page["nodes"][0].update({"font_size_px": 18, "font_family": "'MyriadPro', Arial", "font_weight": "700"})
+        html = render_page_html(page, Path("render.html"))
+        self.assertIn("font-size:18px", html)
+        self.assertIn("font-family:'MyriadPro', Arial", html)
+        self.assertIn("font-weight:700", html)
+
     def test_render_comparison_contains_original_and_rendered_panels(self):
         html = render_comparison_html(
             self.sample_page(),

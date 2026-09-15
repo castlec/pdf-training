@@ -342,6 +342,8 @@ def render_equation_node(node: dict[str, Any]) -> str:
 
 
 def render_image_node(node: dict[str, Any], output_path: Path) -> str:
+    if node.get("render_suppressed"):
+        return ""
     box = node["bbox"]
     raw_asset = node.get("asset") or node.get("image_asset") or node.get("crop_asset")
     asset = asset_path(str(raw_asset), output_path) if raw_asset else None

@@ -152,6 +152,27 @@ python3 tools/equation_review.py build \
   --model gemma3
 ```
 
+For a Windows-hosted Unsloth server called from WSL2, source the shared private
+env file and use the WSL host path:
+
+```bash
+PDF_TRAINING_SECRETS_ENV="${PDF_TRAINING_SECRETS_ENV:-/path/to/private/secrets.env}"
+set -a
+source "${PDF_TRAINING_SECRETS_ENV}"
+set +a
+python3 tools/equation_review.py build \
+  --input private/book/renderable/page-001.json \
+  --source-base private/book \
+  --report-root private/book/equation-review/page-001 \
+  --provider ollama-chat \
+  --host "${UNSLOTH_WSL_HOST}" \
+  --model default
+```
+
+`UNSLOTH_WSL_HOST` is a private machine-local setting for the WSL2-to-Windows
+gateway URL, for example `http://192.168.192.1:8888`. Do not commit token
+values or source-derived model responses.
+
 After human or automated correction files are written under
 `corrections/<equation-id>.json`, merge accepted LaTeX back into renderable
 metadata:
