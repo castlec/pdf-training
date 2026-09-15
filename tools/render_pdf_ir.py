@@ -162,7 +162,93 @@ def _debug_instructions(box: dict[str, Any], paint: dict[str, Any], *, height: f
 
 
 def render_recursive_operation_groups(pdf: pikepdf.Pdf, page: pikepdf.Page, resolver: Resolver, operations: list[dict[str, Any]], groups: list[dict[str, Any]]) -> tuple[pikepdf.Stream, int]:
-    """Render declared operation groups recursively without consulting the source PDF."""
+    """Render operations through explicit enter/exit ownership contexts."""
+    height = float(page.MediaBox[3]) - float(page.MediaBox[1])
+    by_ordinal = {int(item.get("ordinal", index)): item for index, item in enumerate(operations)}
+    owner_by_ordinal: dict[int, list[dict[str, Any]]] = {}
+    replaced_ordinals: set[int] = set()
+    owned_groups: set[int] = set()
+
+    def children(group: dict[str, Any]) -> list[dict[str, Any]]:
+        return [
+            child
+            for key in ("children", "operation_groups")
+            for child in group.get(key) or []
+            if isinstance(child, dict)
+        ]
+
+    def assign(group: dict[str, Any], path: list[dict[str, Any]]) -> None:
+        next_path = path + [group]
+        direct = set()
+        if group.get("role") != "associated_text":
+            direct.update(int(value) for value in group.get("operation_ordinals") or [])
+            direct.update(int(value) for value in group.get("source_operation_ordinals") or [])
+        if direct:
+            owned_groups.add(id(group))
+        if group.get("render_operations") is not None:
+            replaced_ordinals.update(direct)
+        for ordinal in direct:
+            previous = owner_by_ordinal.get(ordinal)
+            if previous is not None:
+                raise ValueError(f"operation {ordinal} has multiple active render owners")
+            owner_by_ordinal[ordinal] = next_path
+        for child in children(group):
+            assign(child, next_path)
+
+    for root in groups:
+        assign(root, [])
+
+    def enter(group: dict[str, Any]) -> list[pikepdf.ContentStreamInstruction]:
+        transform = _group_transform(page, group)
+        coordinate_space = group.get("coordinate_space") or {}
+        local = isinstance(coordinate_space, dict) and coordinate_space.get("origin_convention") == "top-left"
+        paint = ((group.get("paint") or {}).get("debug") or {})
+        result = [pikepdf.ContentStreamInstruction([], pikepdf.Operator("q"))]
+        if transform is not None:
+            result.append(pikepdf.ContentStreamInstruction(transform, pikepdf.Operator("cm")))
+        result.extend(_debug_instructions(group.get("bbox") or {}, paint, height=height, local=local, before=True))
+        for operation in group.get("render_operations") or []:
+            result.append(pikepdf.ContentStreamInstruction([resolver.value(value) for value in operation.get("operands") or []], pikepdf.Operator(str(operation["operator"]))))
+        return result
+
+    def exit_context(group: dict[str, Any]) -> list[pikepdf.ContentStreamInstruction]:
+        transform = _group_transform(page, group)
+        coordinate_space = group.get("coordinate_space") or {}
+        local = isinstance(coordinate_space, dict) and coordinate_space.get("origin_convention") == "top-left"
+        paint = ((group.get("paint") or {}).get("debug") or {})
+        result = _debug_instructions(group.get("bbox") or {}, paint, height=height, local=local, before=False)
+        if transform is not None:
+            result.append(pikepdf.ContentStreamInstruction([], pikepdf.Operator("Q")))
+        else:
+            result.append(pikepdf.ContentStreamInstruction([], pikepdf.Operator("Q")))
+        return result
+
+    instructions: list[pikepdf.ContentStreamInstruction] = []
+    active: list[dict[str, Any]] = []
+    rendered = 0
+    for ordinal in sorted(by_ordinal):
+        desired = owner_by_ordinal.get(ordinal, [])
+        common = 0
+        while common < len(active) and common < len(desired) and active[common] is desired[common]:
+            common += 1
+        for group in reversed(active[common:]):
+            instructions.extend(exit_context(group))
+        active = active[:common]
+        for group in desired[common:]:
+            instructions.extend(enter(group))
+        if desired[common:] :
+            rendered += sum(1 for group in desired[common:] if id(group) in owned_groups)
+        active = desired
+        if ordinal not in replaced_ordinals:
+            operation = by_ordinal[ordinal]
+            instructions.append(pikepdf.ContentStreamInstruction([resolver.value(value) for value in operation.get("operands") or []], pikepdf.Operator(str(operation["operator"]))))
+    for group in reversed(active):
+        instructions.extend(exit_context(group))
+    return pikepdf.Stream(pdf, pikepdf.unparse_content_stream(instructions)), len(owned_groups)
+
+
+def render_recursive_operation_groups_legacy(pdf: pikepdf.Pdf, page: pikepdf.Page, resolver: Resolver, operations: list[dict[str, Any]], groups: list[dict[str, Any]]) -> tuple[pikepdf.Stream, int]:
+    """Legacy span renderer retained for output comparison."""
     height = float(page.MediaBox[3]) - float(page.MediaBox[1])
     by_ordinal = {int(item.get("ordinal", index)): item for index, item in enumerate(operations)}
     def direct_owned(group: dict[str, Any]) -> set[int]:

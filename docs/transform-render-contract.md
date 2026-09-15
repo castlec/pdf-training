@@ -31,6 +31,12 @@ A node is renderable from the transformed document alone. Its owned operations, 
 4. Recursive rendering must preserve page-level operations in gaps between sparse group-owned operations.
 5. Layout changes such as expandable borders are transforms or explicit node realizations, never hidden renderer heuristics.
 
+## Context Events
+
+The renderer treats each active node as a context with an enter and exit boundary. Enter applies the node's coordinate transform and pre-content paint; exit applies post-content paint and restores the parent context. The active context stack is selected from the exact owner path of each operation in source order.
+
+A group span is only an ordering hint. It does not grant ownership of operations between its first and last ordinal. Operations without a group owner remain page-owned and are emitted after closing the previous group context. Sparse child ownership is therefore rendered without leaking parent transforms or graphics state into page-owned gaps.
+
 ## Validation
 
 `apply_transform` validates every transform result. Validation checks the PDF IR schema, recursive CFG shape, operation ordinal validity, duplicate active ownership, and render closure. Pipeline execution therefore fails at the transform that first violates the contract rather than producing a misleading final PDF.
