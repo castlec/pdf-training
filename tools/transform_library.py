@@ -83,5 +83,10 @@ def apply_transform(document: dict[str, Any], transform_id: str, options: dict[s
     options = options or {}
     parameters = inspect.signature(transform).parameters
     if "options" in parameters or any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()):
-        return transform(document, options=options)
-    return transform(document)
+        result = transform(document, options=options)
+    else:
+        result = transform(document)
+    from tools.transform_contract import validate_transform_result
+
+    validate_transform_result(result)
+    return result

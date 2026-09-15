@@ -118,7 +118,7 @@ def test_origin_move_shifts_associated_text_matrix_with_group():
     assert result["provenance"]["move_groups_to_parent_origin"]["text_matrices_moved"] == 1
 
 
-def test_operation_group_ownership_reports_overlapping_siblings():
+def test_operation_group_ownership_ignores_nonoverlapping_sparse_spans():
     from tools.operation_grouping import operation_group_ownership_diagnostics
 
     groups = [
@@ -126,14 +126,23 @@ def test_operation_group_ownership_reports_overlapping_siblings():
         {"id": "lower", "operation_ordinals": [5, 15]},
     ]
 
-    diagnostics = operation_group_ownership_diagnostics(groups)
-    assert diagnostics == [{
-        "kind": "overlapping_sibling_operation_spans",
+    assert operation_group_ownership_diagnostics(groups) == []
+
+
+def test_operation_group_ownership_reports_duplicate_ordinals():
+    from tools.operation_grouping import operation_group_ownership_diagnostics
+
+    groups = [
+        {"id": "upper", "operation_ordinals": [10, 11]},
+        {"id": "lower", "operation_ordinals": [10, 15]},
+    ]
+
+    assert operation_group_ownership_diagnostics(groups) == [{
+        "kind": "overlapping_sibling_operation_ownership",
         "parent_id": None,
         "left_id": "upper",
-        "left_span": [10, 11],
         "right_id": "lower",
-        "right_span": [5, 15],
+        "operation_ordinals": [10],
     }]
 
 

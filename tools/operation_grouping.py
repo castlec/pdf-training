@@ -296,34 +296,33 @@ def _union_boxes(boxes: list[dict[str, Any]]) -> dict[str, float]:
 
 
 def operation_group_ownership_diagnostics(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Report overlapping sibling operation spans that cannot form a render tree."""
+    """Report duplicate exact operation ownership among sibling groups."""
     diagnostics: list[dict[str, Any]] = []
 
-    def span(group: dict[str, Any]) -> tuple[int, int] | None:
-        if group.get("role") == "associated_text" and not group.get("operation_ordinals"):
-            return None
-        ordinals = [int(value) for value in group.get("operation_ordinals") or []]
-        ordinals.extend(int(value) for value in group.get("source_operation_ordinals") or [])
-        children = (group.get("children") or []) + (group.get("operation_groups") or [])
-        child_spans = [span(child) for child in children if isinstance(child, dict)]
-        ordinals.extend(value for child_span in child_spans if child_span is not None for value in child_span)
-        return (min(ordinals), max(ordinals)) if ordinals else None
+    def owned(group: dict[str, Any]) -> set[int]:
+        if group.get("role") == "associated_text":
+            result: set[int] = set()
+        else:
+            result = {int(value) for value in group.get("operation_ordinals") or []}
+            result.update(int(value) for value in group.get("source_operation_ordinals") or [])
+        for child in (group.get("children") or []) + (group.get("operation_groups") or []):
+            if isinstance(child, dict):
+                result.update(owned(child))
+        return result
 
     def visit(parent_id: str | None, siblings: list[dict[str, Any]]) -> None:
-        entries = [(group, span(group)) for group in siblings]
-        for index, (left, left_span) in enumerate(entries):
-            if left_span is None:
-                continue
-            for right, right_span in entries[index + 1:]:
-                if right_span is None or left_span[1] < right_span[0] or right_span[1] < left_span[0]:
+        entries = [(group, owned(group)) for group in siblings]
+        for index, (left, left_owned) in enumerate(entries):
+            for right, right_owned in entries[index + 1:]:
+                overlap = sorted(left_owned & right_owned)
+                if not overlap:
                     continue
                 diagnostics.append({
-                    "kind": "overlapping_sibling_operation_spans",
+                    "kind": "overlapping_sibling_operation_ownership",
                     "parent_id": parent_id,
                     "left_id": left.get("id"),
-                    "left_span": list(left_span),
                     "right_id": right.get("id"),
-                    "right_span": list(right_span),
+                    "operation_ordinals": overlap,
                 })
         for group in siblings:
             children = [child for child in (group.get("children") or []) + (group.get("operation_groups") or []) if isinstance(child, dict)]
@@ -391,6 +390,16 @@ def promote_content_groups_to_one_cell_tables(input_data: dict[str, Any]) -> dic
         table_bbox = copy.deepcopy(original.get("bbox") or {})
         if frame is not None and frame.get("bbox"):
             table_bbox = _union_boxes([table_bbox, frame["bbox"]])
+        frame_children = [
+            {
+                "id": f"{group_id}::frame::{ordinal}",
+                "type": "group",
+                "role": "container_border_operation",
+                "bbox": copy.deepcopy((frame or {}).get("bbox") or table_bbox),
+                "operation_ordinals": [int(ordinal)],
+            }
+            for ordinal in (frame or {}).get("border_operations") or []
+        ]
         table.update({
             "id": group_id,
             "type": "group",
@@ -398,8 +407,6 @@ def promote_content_groups_to_one_cell_tables(input_data: dict[str, Any]) -> dic
             "layout_kind": "table",
             "bbox": table_bbox,
             "children": [],
-            "owned_operation_ordinals": [int(ordinal) for ordinal in (frame or {}).get("border_operations") or []],
-            "container_border": {"kind": "source-frame", "stroke_width": 0.96} if frame is not None else None,
         })
         cell = {
             key: copy.deepcopy(item)
@@ -412,7 +419,7 @@ def promote_content_groups_to_one_cell_tables(input_data: dict[str, Any]) -> dic
             "role": "content_group",
             "layout_kind": "cell",
             "bbox": copy.deepcopy(table_bbox),
-            "children": child_values,
+            "children": frame_children + child_values,
         })
         table["children"] = [cell]
         promoted += 1

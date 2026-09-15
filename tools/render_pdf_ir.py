@@ -165,16 +165,20 @@ def render_recursive_operation_groups(pdf: pikepdf.Pdf, page: pikepdf.Page, reso
     """Render declared operation groups recursively without consulting the source PDF."""
     height = float(page.MediaBox[3]) - float(page.MediaBox[1])
     by_ordinal = {int(item.get("ordinal", index)): item for index, item in enumerate(operations)}
-    owned_ordinals: set[int] = set()
+    def direct_owned(group: dict[str, Any]) -> set[int]:
+        if group.get("role") == "associated_text":
+            return set()
+        ordinals = {int(value) for value in group.get("operation_ordinals") or []}
+        ordinals.update(int(value) for value in group.get("source_operation_ordinals") or [])
+        return ordinals
 
-    def collect_owned(group: dict[str, Any]) -> None:
-        owned_ordinals.update(int(value) for value in group.get("owned_operation_ordinals") or [])
+    def subtree_owned(group: dict[str, Any]) -> set[int]:
+        result = direct_owned(group)
         for child in (group.get("children") or []) + (group.get("operation_groups") or []):
             if isinstance(child, dict):
-                collect_owned(child)
+                result.update(subtree_owned(child))
+        return result
 
-    for root in groups:
-        collect_owned(root)
     roots = [(group, _group_span(group)) for group in groups]
     roots = [(group, span) for group, span in roots if span is not None]
     rendered = 0
@@ -195,25 +199,6 @@ def render_recursive_operation_groups(pdf: pikepdf.Pdf, page: pikepdf.Page, reso
         result.append(pikepdf.ContentStreamInstruction([], pikepdf.Operator("Q")))
         return result
 
-    def emit_container_border(group: dict[str, Any]) -> list[pikepdf.ContentStreamInstruction]:
-        border = group.get("container_border") or {}
-        bbox = group.get("bbox") or {}
-        if not border or not bbox:
-            return []
-        x = float(bbox.get("x", 0))
-        y = height - float(bbox.get("y", 0)) - float(bbox.get("h", 0))
-        width = float(bbox.get("w", 0))
-        box_height = float(bbox.get("h", 0))
-        stroke_width = float(border.get("stroke_width", 0.96))
-        return [
-            pikepdf.ContentStreamInstruction([], pikepdf.Operator("q")),
-            pikepdf.ContentStreamInstruction([0.0], pikepdf.Operator("G")),
-            pikepdf.ContentStreamInstruction([stroke_width], pikepdf.Operator("w")),
-            pikepdf.ContentStreamInstruction([x, y, width, box_height], pikepdf.Operator("re")),
-            pikepdf.ContentStreamInstruction([], pikepdf.Operator("S")),
-            pikepdf.ContentStreamInstruction([], pikepdf.Operator("Q")),
-        ]
-
     def emit_backgrounds(group: dict[str, Any], span: tuple[int, int]) -> list[pikepdf.ContentStreamInstruction]:
         transform = _group_transform(page, group)
         result = [pikepdf.ContentStreamInstruction([], pikepdf.Operator("q"))]
@@ -223,7 +208,6 @@ def render_recursive_operation_groups(pdf: pikepdf.Pdf, page: pikepdf.Page, reso
         local = isinstance(coordinate_space, dict) and coordinate_space.get("origin_convention") == "top-left"
         paint = ((group.get("paint") or {}).get("debug") or {})
         result.extend(_debug_instructions(group.get("bbox") or {}, paint, height=height, local=local, before=True))
-        result.extend(emit_container_border(group))
         for child, child_span in children_with_spans(group):
             result.extend(emit_backgrounds(child, child_span))
         result.append(pikepdf.ContentStreamInstruction([], pikepdf.Operator("Q")))
@@ -234,11 +218,7 @@ def render_recursive_operation_groups(pdf: pikepdf.Pdf, page: pikepdf.Page, reso
         result = [pikepdf.ContentStreamInstruction([], pikepdf.Operator("q"))]
         if transform is not None:
             result.append(pikepdf.ContentStreamInstruction(transform, pikepdf.Operator("cm")))
-        if not group.get("container_border"):
-            for ordinal in sorted(int(value) for value in group.get("owned_operation_ordinals") or []):
-                operation = by_ordinal.get(ordinal)
-                if operation is not None:
-                    result.append(pikepdf.ContentStreamInstruction([resolver.value(value) for value in operation.get("operands") or []], pikepdf.Operator(str(operation["operator"]))))
+        visible_ordinals = subtree_owned(group)
         child_by_start = {child_span[0]: (child, child_span) for child, child_span in children_with_spans(group)}
         ordinal = span[0]
         while ordinal <= span[1]:
@@ -248,7 +228,7 @@ def render_recursive_operation_groups(pdf: pikepdf.Pdf, page: pikepdf.Page, reso
                 result.extend(emit_content(child, child_span))
                 ordinal = child_span[1] + 1
                 continue
-            if ordinal in owned_ordinals:
+            if ordinal not in visible_ordinals:
                 ordinal += 1
                 continue
             operation = by_ordinal.get(ordinal)
@@ -274,6 +254,7 @@ def render_recursive_operation_groups(pdf: pikepdf.Pdf, page: pikepdf.Page, reso
 
     instructions = []
     root_by_start = {span[0]: (group, span) for group, span in roots}
+    rendered_owned: set[int] = set()
     ordinal = 0
     while ordinal < len(operations):
         root_entry = root_by_start.get(ordinal)
@@ -282,10 +263,11 @@ def render_recursive_operation_groups(pdf: pikepdf.Pdf, page: pikepdf.Page, reso
             instructions.extend(emit_backgrounds(group, span))
             instructions.extend(emit_content(group, span))
             instructions.extend(emit_borders(group, span))
+            rendered_owned.update(subtree_owned(group))
             rendered += 1
-            ordinal = span[1] + 1
+            ordinal += 1
             continue
-        if ordinal not in owned_ordinals:
+        if ordinal not in rendered_owned:
             operation = by_ordinal.get(ordinal)
             if operation is not None:
                 instructions.append(pikepdf.ContentStreamInstruction([resolver.value(value) for value in operation.get("operands") or []], pikepdf.Operator(str(operation["operator"]))))
