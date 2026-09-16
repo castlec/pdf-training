@@ -67,8 +67,8 @@ def test_content_group_promotes_to_one_cell_table_without_replacing_geometry():
     assert "layout_table" not in table
 
 
-def test_text_association_references_source_span_without_replacing_operations():
-    from tools.operation_grouping import associate_text_operations
+def test_text_association_transfers_complete_source_span_into_child_owner():
+    from tools.operation_grouping import associate_text_operations, expand_associated_content
 
     operations = [
         {"ordinal": 0, "operator": "BT", "operands": []},
@@ -86,9 +86,15 @@ def test_text_association_references_source_span_without_replacing_operations():
 
     result = associate_text_operations(data, options={"collision_span": {"left": 10, "right": 24, "top": 10, "bottom": 0}})
     group = result["pages"][0]["operation_groups"][0]
-    assert group["text_operation_references"] == ["p1-geometry-01-text-2"]
-    assert group["children"][0]["source_operation_ordinals"] == [0, 2]
-    assert result["pages"][0]["operations"] == operations
+    text_group = group["children"][0]
+    assert text_group["role"] == "text_operations"
+    assert text_group["operation_ordinals"] == [0, 1, 2, 3]
+    assert text_group["children"][0]["source_operation_ordinals"] == [0, 2]
+    expanded = expand_associated_content(result)
+    wrapper = expanded["pages"][0]["operation_groups"][0]
+    assert wrapper["role"] == "content_group"
+    assert wrapper["children"][0]["children"][0]["role"] == "text_operations"
+    assert expanded["pages"][0]["operations"] == operations
     assert "associated_text" not in data["pages"][0]["operation_groups"][0]
 
 

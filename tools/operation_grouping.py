@@ -240,7 +240,7 @@ def _text_operation_candidates(page: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def associate_text_operations(input_data: dict[str, Any], *, options: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Attach located PDF text operations to their enclosing geometric groups."""
+    """Associate text with geometry and transfer its complete source span atomically."""
     out = copy.deepcopy(input_data)
     options = options or {}
     span = options.get("collision_span") or {}
@@ -250,9 +250,68 @@ def associate_text_operations(input_data: dict[str, Any], *, options: dict[str, 
     if isinstance(pages, dict):
         pages = list(pages.values())
     associated = 0
+    transferred_groups = 0
+    transferred_ordinals: set[int] = set()
+
+    def complete_text_span(operations: list[dict[str, Any]], candidate: dict[str, Any]) -> list[int]:
+        """Return the local q/clip/text/Q realization for a text candidate."""
+        anchors = [int(value) for value in candidate.get("text_span") or []]
+        if not anchors:
+            return []
+        end_anchor = max(anchors)
+        end_index = next(
+            (index for index, operation in enumerate(operations)
+             if int(operation.get("ordinal", 0)) == end_anchor),
+            None,
+        )
+        if end_index is None:
+            return sorted(set(anchors))
+        text_start_index = next(
+            (index for index in range(end_index, -1, -1)
+             if operations[index].get("operator") == "BT"),
+            None,
+        )
+        if text_start_index is None:
+            return sorted(set(anchors))
+
+        start_index = text_start_index
+        for index in range(text_start_index - 1, -1, -1):
+            operator = operations[index].get("operator")
+            if operator == "q":
+                start_index = index
+                break
+            if operator in {"Q", "BT", "ET", "BDC", "EMC"}:
+                break
+
+        end_index = next(
+            (index for index in range(end_index, len(operations))
+             if operations[index].get("operator") == "ET"),
+            end_index,
+        )
+        if end_index + 1 < len(operations) and operations[end_index + 1].get("operator") == "Q":
+            end_index += 1
+        return [
+            int(operation.get("ordinal", 0))
+            for operation in operations[start_index:end_index + 1]
+        ]
+
+    def area(box: dict[str, Any]) -> float:
+        return max(0.0, float(box.get("w", 0))) * max(0.0, float(box.get("h", 0)))
+
+    def remove_ownership(value: Any, ordinals: set[int]) -> None:
+        if not isinstance(value, dict):
+            return
+        for key in ("operation_ordinals", "source_operation_ordinals"):
+            if key in value:
+                value[key] = [int(item) for item in value.get(key) or [] if int(item) not in ordinals]
+        for key in ("children", "operation_groups"):
+            for child in value.get(key) or []:
+                remove_ownership(child, ordinals)
+
     for page in pages:
+        operations = page.get("operations") or (page.get("realization") or {}).get("operations") or []
         candidates = _text_operation_candidates(page)
-        groups = []
+        groups: list[dict[str, Any]] = []
 
         def collect(value: Any) -> None:
             if not isinstance(value, dict):
@@ -264,24 +323,82 @@ def associate_text_operations(input_data: dict[str, Any], *, options: dict[str, 
             for child in value.get("operation_groups") or []:
                 collect(child)
 
-        page_groups = page.get("operation_groups") or []
-        for group in page_groups:
+        for group in page.get("operation_groups") or []:
             collect(group)
-        for group in groups:
-            box = group.get("bbox") or {}
-            envelope = {"x": box.get("x", 0) - left, "y": box.get("y", 0) - top, "w": box.get("w", 0) + left + right, "h": box.get("h", 0) + top + bottom}
-            for candidate in candidates:
-                text_box = candidate["bbox"]
-                if not _contains({"bbox": envelope}, text_box) and not _contains({"bbox": text_box}, box):
-                    continue
-                node = {"id": f"{group.get('id')}-text-{candidate['operation_ordinal']}", "type": "text_realization", "role": "associated_text", "bbox": text_box, "source_operation_ordinals": candidate["text_span"], "coordinate_space": "page", "render_mode": "source_operation_reference"}
-                existing = {item.get("id") for item in group.get("children") or [] if isinstance(item, dict)}
-                if node["id"] in existing:
-                    continue
-                group.setdefault("children", []).append(node)
-                group.setdefault("text_operation_references", []).append(node["id"])
-                associated += 1
-    out.setdefault("provenance", {})["text_operation_association"] = {"transform": TEXT_ASSOCIATION_TRANSFORM_ID, "associated": associated, "collision_span": span}
+
+        assignments: dict[str, list[dict[str, Any]]] = {}
+        for candidate in candidates:
+            text_box = candidate["bbox"]
+            matching = []
+            for group in groups:
+                box = group.get("bbox") or {}
+                envelope = {
+                    "x": box.get("x", 0) - left,
+                    "y": box.get("y", 0) - top,
+                    "w": box.get("w", 0) + left + right,
+                    "h": box.get("h", 0) + top + bottom,
+                }
+                if _contains({"bbox": envelope}, text_box) or _contains({"bbox": text_box}, box):
+                    matching.append(group)
+            if not matching:
+                continue
+            owner = min(matching, key=lambda group: (area(group.get("bbox") or {}), str(group.get("id"))))
+            assignments.setdefault(str(owner.get("id")), []).append(candidate)
+
+        by_group_id = {str(group.get("id")): group for group in groups}
+        for group_id, assigned in assignments.items():
+            group = by_group_id[group_id]
+            spans: dict[tuple[int, ...], list[dict[str, Any]]] = {}
+            for candidate in assigned:
+                source_span = tuple(complete_text_span(operations, candidate))
+                if source_span:
+                    spans.setdefault(source_span, []).append(candidate)
+            for source_span, span_candidates in spans.items():
+                source_ordinals = set(source_span)
+                remove_ownership(group, source_ordinals)
+                text_box = _union_boxes([candidate["bbox"] for candidate in span_candidates])
+                text_group_id = f"{group_id}-text-ops-{source_span[0]}"
+                existing_ids = {
+                    str(child.get("id"))
+                    for child in group.get("children") or []
+                    if isinstance(child, dict)
+                }
+                if text_group_id not in existing_ids:
+                    text_group = {
+                        "id": text_group_id,
+                        "type": "group",
+                        "role": "text_operations",
+                        "bbox": text_box,
+                        "operation_ordinals": list(source_span),
+                        "coordinate_space": "page",
+                        "render_mode": "source_operations",
+                        "children": [],
+                    }
+                    for candidate in span_candidates:
+                        text_group["children"].append({
+                            "id": f"{group_id}-text-{candidate['operation_ordinal']}",
+                            "type": "text_realization",
+                            "role": "associated_text",
+                            "bbox": candidate["bbox"],
+                            "source_operation_ordinals": candidate["text_span"],
+                            "source_operation_span": list(source_span),
+                            "coordinate_space": "page",
+                            "render_mode": "source_operation_reference",
+                        })
+                    group.setdefault("children", []).append(text_group)
+                    transferred_groups += 1
+                transferred_ordinals.update(source_ordinals)
+                associated += len(span_candidates)
+        page.setdefault("operation_groups", [])
+
+    out.setdefault("provenance", {})["text_operation_association"] = {
+        "transform": TEXT_ASSOCIATION_TRANSFORM_ID,
+        "associated": associated,
+        "transferred_groups": transferred_groups,
+        "transferred_operation_ordinals": sorted(transferred_ordinals),
+        "collision_span": span,
+        "ownership_transfer": "complete_source_span",
+    }
     return out
 
 
@@ -739,7 +856,7 @@ def materialize_operation_tree(input_data: dict[str, Any]) -> dict[str, Any]:
 
 
 def expand_associated_content(input_data: dict[str, Any], *, options: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Wrap geometry and associated text in an expanded content group."""
+    """Wrap geometry and its recursively owned associated text in a content group."""
     out = copy.deepcopy(input_data)
     pages = out.get("pages") or []
     if isinstance(pages, dict):
@@ -750,24 +867,30 @@ def expand_associated_content(input_data: dict[str, Any], *, options: dict[str, 
         groups = page.get("operation_groups") or []
         replacement = []
         for group in groups:
-            text_nodes = [node for node in group.get("children") or [] if node.get("role") == "associated_text"]
+            text_nodes: list[dict[str, Any]] = []
+
+            def collect_text(value: Any) -> None:
+                if not isinstance(value, dict):
+                    return
+                if value.get("role") == "associated_text":
+                    text_nodes.append(value)
+                for key in ("children", "operation_groups"):
+                    for child in value.get(key) or []:
+                        collect_text(child)
+
+            collect_text(group)
             boxes = [group.get("bbox") or {}] + [node.get("bbox") or {} for node in text_nodes]
             if not text_nodes or not all(all(key in box for key in ("x", "y", "w", "h")) for box in boxes):
                 replacement.append(group)
                 continue
             content_box = _union_boxes(boxes)
-            text_children = [copy.deepcopy(node) for node in text_nodes]
             content_group = copy.deepcopy(group)
-            content_group["children"] = [
-                child for child in content_group.get("children") or []
-                if child.get("role") != "associated_text"
-            ]
             wrapper = {
                 "id": f"{group.get('id')}-content",
                 "type": "group",
                 "role": "content_group",
                 "bbox": content_box,
-                "children": [content_group, *text_children],
+                "children": [content_group],
                 "content_bbox": copy.deepcopy(content_box),
                 "source_group_id": group.get("id"),
             }
@@ -782,8 +905,16 @@ def expand_associated_content(input_data: dict[str, Any], *, options: dict[str, 
                 "x": float(content_box["x"]) * raw_width / page_width - float(old_parent.get("x", 0)),
                 "y": float(content_box["y"]) * raw_height / page_height - float(old_parent.get("y", 0)),
             }
-            content_group["parent_context_bbox_pdf"] = {"x": float(content_box["x"]) * raw_width / page_width, "y": float(content_box["y"]) * raw_height / page_height, "w": float(content_box["w"]) * raw_width / page_width, "h": float(content_box["h"]) * raw_height / page_height}
-            content_group["relative_offset_pdf"] = {"x": (float(content_group["bbox"]["x"]) - float(content_box["x"])) * raw_width / page_width, "y": (float(content_group["bbox"]["y"]) - float(content_box["y"])) * raw_height / page_height}
+            content_group["parent_context_bbox_pdf"] = {
+                "x": float(content_box["x"]) * raw_width / page_width,
+                "y": float(content_box["y"]) * raw_height / page_height,
+                "w": float(content_box["w"]) * raw_width / page_width,
+                "h": float(content_box["h"]) * raw_height / page_height,
+            }
+            content_group["relative_offset_pdf"] = {
+                "x": (float(content_group["bbox"]["x"]) - float(content_box["x"])) * raw_width / page_width,
+                "y": (float(content_group["bbox"]["y"]) - float(content_box["y"])) * raw_height / page_height,
+            }
             replacement.append(wrapper)
             created += 1
         page["operation_groups"] = replacement
