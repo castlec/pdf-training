@@ -35,7 +35,12 @@ def test_intrinsic_layout_grows_cell_and_replaces_frame_operations():
 
     result = apply_intrinsic_container_layout(document)
     cell = result["pages"][0]["operation_groups"][0]["children"][0]
-    assert cell["layout"] == {"sizing": "intrinsic", "overflow": "grow", "overlap": "allowed"}
+    assert cell["layout"]["sizing"] == "intrinsic"
+    assert cell["layout"]["overflow"] == "grow"
+    assert cell["layout"]["overlap"] == "allowed"
+    assert cell["layout"]["growth"]["before"] == {"x": 10, "y": 10, "w": 20, "h": 20}
+    assert cell["layout"]["growth"]["after"] == {"x": 10.0, "y": 10.0, "w": 40.0, "h": 50.0}
+    assert cell["layout"]["growth"]["delta"]["bottom"] == 30.0
     assert cell["bbox"] == {"x": 10.0, "y": 10.0, "w": 40.0, "h": 50.0}
     assert cell["children"][0]["role"] == "container_border"
     assert cell["children"][0]["source_operation_ordinals"] == [1]

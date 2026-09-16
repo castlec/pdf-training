@@ -733,6 +733,23 @@ def apply_intrinsic_container_layout(input_data: dict[str, Any], *, options: dic
         grown["w"] = float(grown.get("w", 0)) + default_padding["left"] + default_padding["right"]
         grown["h"] = float(grown.get("h", 0)) + default_padding["top"] + default_padding["bottom"]
         result["bbox"] = grown
+        if result.get("layout_kind") in {"cell", "table"} and any(
+            float(grown.get(key, 0)) != float(existing.get(key, 0))
+            for key in ("x", "y", "w", "h")
+        ):
+            before_bottom = float(existing.get("y", 0)) + float(existing.get("h", 0))
+            after_bottom = float(grown.get("y", 0)) + float(grown.get("h", 0))
+            policy["growth"] = {
+                "before": copy.deepcopy(existing),
+                "after": copy.deepcopy(grown),
+                "delta": {
+                    "x": float(grown.get("x", 0)) - float(existing.get("x", 0)),
+                    "y": float(grown.get("y", 0)) - float(existing.get("y", 0)),
+                    "w": float(grown.get("w", 0)) - float(existing.get("w", 0)),
+                    "h": float(grown.get("h", 0)) - float(existing.get("h", 0)),
+                    "bottom": after_bottom - before_bottom,
+                },
+            }
         if result.get("layout_kind") in {"table", "cell"}:
             result.setdefault("coordinate_space", {
                 "name": "page",
