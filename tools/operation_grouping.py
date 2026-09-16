@@ -558,7 +558,7 @@ def promote_content_groups_to_one_cell_tables(input_data: dict[str, Any]) -> dic
 
 
 def inject_text_lines_into_first_cell(input_data: dict[str, Any], *, options: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Add declared test text operations to the first table cell on one page."""
+    """Add declared test text as child-owned content to the first table cell."""
     out = copy.deepcopy(input_data)
     options = options or {}
     target_page = str(options.get("page_id") or "page-004")
@@ -587,10 +587,11 @@ def inject_text_lines_into_first_cell(input_data: dict[str, Any], *, options: di
         line_height = 14.0
         x = float(bbox.get("x", 0)) + 4.0
         next_ordinal = max((int(operation["ordinal"]) for operation in page.get("operations") or []), default=-1) + 1
-        ordinals = []
+        line_groups = []
         for index, line in enumerate(lines):
             top = start_top + index * line_height
             pdf_y = page_height - top - 10.0
+            line_ordinals = []
             for operator, operands in (
                 ("BT", []),
                 ("Tf", [{"type": "name", "value": "/F1"}, 12]),
@@ -601,13 +602,32 @@ def inject_text_lines_into_first_cell(input_data: dict[str, Any], *, options: di
                 ordinal = next_ordinal
                 next_ordinal += 1
                 page.setdefault("operations", []).append({"ordinal": ordinal, "operator": operator, "operands": operands})
-                ordinals.append(ordinal)
+                line_ordinals.append(ordinal)
+            line_groups.append({
+                "id": f"{cell.get('id', 'cell')}-synthetic-line-{index + 1}",
+                "type": "group",
+                "role": "synthetic_text_line",
+                "bbox": {
+                    "x": x,
+                    "y": top,
+                    "w": max(12.0, len(line) * 6.0),
+                    "h": 12.0,
+                },
+                "operation_ordinals": line_ordinals,
+                "coordinate_space": "page",
+                "render_mode": "source_operations",
+            })
         structured = page.get("structured_operations") or {}
         structured_children = structured.get("children") if isinstance(structured, dict) else None
         if not isinstance(structured_children, list):
             raise ValueError(f"page {target_page} has no structured operation children")
         effective_state = copy.deepcopy(structured_children[-1].get("effective_state", {})) if structured_children else {}
-        for operation in page["operations"][-len(ordinals):]:
+        synthetic_ordinals = [
+            ordinal
+            for line_group in line_groups
+            for ordinal in line_group["operation_ordinals"]
+        ]
+        for operation in page["operations"][-len(synthetic_ordinals):]:
             structured_children.append({
                 "type": "operation",
                 "source_ordinal": int(operation["ordinal"]),
@@ -615,11 +635,19 @@ def inject_text_lines_into_first_cell(input_data: dict[str, Any], *, options: di
                 "operands": copy.deepcopy(operation.get("operands") or []),
                 "effective_state": copy.deepcopy(effective_state),
             })
-        cell.setdefault("operation_ordinals", []).extend(ordinals)
-        added_height = len(lines) * line_height + 8.0
-        expanded = {"x": float(bbox.get("x", 0)), "y": float(bbox.get("y", 0)), "w": float(bbox.get("w", 0)), "h": float(bbox.get("h", 0)) + added_height}
-        cell["bbox"] = expanded
-        table["bbox"] = copy.deepcopy(expanded)
+        cell.setdefault("children", []).append({
+            "id": f"{cell.get('id', 'cell')}-synthetic-text",
+            "type": "group",
+            "role": "synthetic_text",
+            "bbox": {
+                "x": min(line["bbox"]["x"] for line in line_groups),
+                "y": min(line["bbox"]["y"] for line in line_groups),
+                "w": max(line["bbox"]["x"] + line["bbox"]["w"] for line in line_groups) - min(line["bbox"]["x"] for line in line_groups),
+                "h": max(line["bbox"]["y"] + line["bbox"]["h"] for line in line_groups) - min(line["bbox"]["y"] for line in line_groups),
+            },
+            "children": line_groups,
+            "coordinate_space": "page",
+        })
         injected = len(lines)
         break
     if injected != 6:
@@ -629,6 +657,7 @@ def inject_text_lines_into_first_cell(input_data: dict[str, Any], *, options: di
         "page_id": target_page,
         "lines": lines,
         "count": injected,
+        "ownership_transfer": "child_groups",
     }
     return out
 
@@ -821,7 +850,10 @@ def materialize_operation_tree(input_data: dict[str, Any]) -> dict[str, Any]:
                 child_owned.update(owned)
                 if first is not None:
                     child_nodes.append((first, node))
-            direct = {int(value) for value in group.get("operation_ordinals") or []}
+            direct = {
+                int(value)
+                for value in (group.get("operation_ordinals") or []) + (group.get("source_operation_ordinals") or [])
+            }
             duplicate = direct & child_owned
             if duplicate:
                 raise ValueError(f"operation group {group_id} claims child ordinals {sorted(duplicate)}")
