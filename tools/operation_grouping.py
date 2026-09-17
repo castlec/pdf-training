@@ -634,7 +634,7 @@ def inject_text_lines_into_first_cell(input_data: dict[str, Any], *, options: di
             line_ordinals = []
             for operator, operands in (
                 ("BT", []),
-                ("Tf", [{"type": "name", "value": "/F1"}, 12]),
+                ("Tf", [{"type": "name", "value": "/F4"}, 12]),
                 ("Tm", [1, 0, 0, 1, x, pdf_y]),
                 ("Tj", [{"type": "string", "value": line}]),
                 ("ET", []),
