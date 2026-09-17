@@ -2,6 +2,7 @@
   "schema": "pdf-training-transform-pipeline-v1",
   "id": "group-horizontal-relative-v1",
   "transforms": [
+    {"id": "font.catalog.v1"},
     {"id": "group.horizontal-rules.v1"},
     {"id": "geometry.operations-into-groups.v1"},
     {

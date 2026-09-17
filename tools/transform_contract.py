@@ -33,6 +33,17 @@ def _validate_cfg(node: dict[str, Any], path: str) -> None:
 
 def validate_transform_result(document: dict[str, Any]) -> None:
     """Validate CFG shape, exact active ownership, and render closure."""
+    metadata = document.get("metadata")
+    if metadata is not None and not isinstance(metadata, dict):
+        raise TransformContractError("document metadata must be an object")
+    font_catalog = metadata.get("font_catalog") if isinstance(metadata, dict) else None
+    if font_catalog is not None:
+        if not isinstance(font_catalog, dict):
+            raise TransformContractError("metadata.font_catalog must be an object")
+        if font_catalog.get("schema") != "pdf-training-font-catalog-v1":
+            raise TransformContractError("metadata.font_catalog has an unknown schema")
+        if not isinstance(font_catalog.get("fonts"), list):
+            raise TransformContractError("metadata.font_catalog.fonts must be an array")
     if document.get("schema") != "pdf-training-pdf-ir-v1":
         pages = document.get("pages") or []
         if not pages or all(not (page.get("operations") or page.get("realization")) for page in pages):

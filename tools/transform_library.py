@@ -48,6 +48,7 @@ def project(document: dict[str, Any]) -> dict[str, Any]:
 
     return project_impl(document)
 
+from tools.font_catalog import TRANSFORM_ID as FONT_CATALOG_ID, catalogue_fonts
 from tools.relative_coordinates import DEBUG_VISUALIZATION_ID, TRANSFORM_ID as RELATIVE_COORDINATES_ID, apply_debug_visualization, apply_relative_coordinates
 from tools.rule_grouping import apply_horizontal_rule_grouping
 from tools.diagnostic_text import INJECT_TEXT_LINES_TRANSFORM_ID, inject_text_lines_into_first_cell
@@ -57,6 +58,7 @@ from tools.localize_operations import TRANSFORM_ID as LOCALIZE_OPERATIONS_ID, ap
 TRANSFORMS: dict[str, Transform] = {
     IDENTITY_ID: identity,
     PROJECT_PDF_IR_ID: project,
+    FONT_CATALOG_ID: catalogue_fonts,
     "group.horizontal-rules.v1": apply_horizontal_rule_grouping,
     OPERATION_GROUPING_ID: apply_operation_grouping,
     TEXT_ASSOCIATION_TRANSFORM_ID: associate_text_operations,
