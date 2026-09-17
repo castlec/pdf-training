@@ -1,4 +1,4 @@
-from tools.operation_grouping import apply_intrinsic_container_layout
+from tools.operation_grouping import apply_intrinsic_container_layout, apply_operation_grouping
 from tools.render_pdf_ir import operation_tree_groups
 
 
@@ -61,3 +61,36 @@ def test_operation_tree_references_do_not_become_owners():
     assert groups[0]["operation_ordinals"] == [4]
     assert groups[0]["source_operation_ordinals"] == []
     assert groups[0]["operation_references"] == [{"source_operation_ordinals": [8, 9]}]
+
+
+def test_frame_ownership_includes_all_boundary_rectangles():
+    document = {
+        "schema": "pdf-training-pdf-ir-v1",
+        "pages": [{
+            "id": "page-001",
+            "width": 500,
+            "height": 100,
+            "media_box": [0, 0, 500, 100],
+            "operations": [
+                {"ordinal": 1, "operator": "re", "operands": [10, 59, 400, 1]},
+                {"ordinal": 2, "operator": "f*", "operands": []},
+                {"ordinal": 3, "operator": "re", "operands": [10, 10, 1, 50]},
+                {"ordinal": 4, "operator": "f*", "operands": []},
+                {"ordinal": 5, "operator": "re", "operands": [409, 10, 1, 50]},
+                {"ordinal": 6, "operator": "f*", "operands": []},
+                {"ordinal": 7, "operator": "re", "operands": [10, 10, 400, 1]},
+                {"ordinal": 8, "operator": "f*", "operands": []},
+            ],
+            "group_tree": [{
+                "id": "section",
+                "bbox": {"x": 10, "y": 40, "w": 400, "h": 50},
+                "children": [],
+            }],
+        }],
+    }
+
+    result = apply_operation_grouping(document)
+    section = result["pages"][0]["group_tree"][0]
+    container = section["children"][0]
+    assert container["role"] == "geometry_container"
+    assert container["border_operations"] == list(range(1, 9))

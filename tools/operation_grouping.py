@@ -146,6 +146,46 @@ def apply_operation_grouping(input_data: dict[str, Any]) -> dict[str, Any]:
         clusters = _cluster_blocks(_marked_geometry_blocks(operations))
         page["operation_groups"] = []
         containers = []
+
+        def frame_paint_operations(source_bbox: dict[str, float], seed: list[int]) -> list[int]:
+            """Capture every source rectangle/fill that paints this frame."""
+            x0 = float(source_bbox["x"])
+            y0 = float(source_bbox["y"])
+            x1 = x0 + float(source_bbox["w"])
+            y1 = y0 + float(source_bbox["h"])
+            ordinals = {int(value) for value in seed}
+            for index, operation in enumerate(operations):
+                if operation.get("operator") != "re":
+                    continue
+                values = _numbers(operation)
+                if len(values) < 4:
+                    continue
+                x, y, w, h = values[:4]
+                horizontal = (
+                    h <= 2
+                    and w >= float(source_bbox["w"]) * 0.8
+                    and (abs(y - y0) <= 2 or abs(y + h - y1) <= 2)
+                )
+                vertical = (
+                    w <= 2
+                    and h > 2
+                    and (abs(x - x0) <= 2 or abs(x + w - x1) <= 2)
+                    and y >= y0 - 2
+                    and y + h <= y1 + 2
+                )
+                corner = (
+                    w <= 2
+                    and h <= 2
+                    and (abs(x - x0) <= 2 or abs(x + w - x1) <= 2)
+                    and (abs(y - y0) <= 2 or abs(y + h - y1) <= 2)
+                )
+                if not (horizontal or vertical or corner):
+                    continue
+                ordinals.add(int(operation.get("ordinal", 0)))
+                if index + 1 < len(operations) and operations[index + 1].get("operator") == "f*":
+                    ordinals.add(int(operations[index + 1].get("ordinal", 0)))
+            return sorted(ordinals)
+
         for frame_index, frame in enumerate(_raw_frame_candidates(page), start=1):
             frame_box = _to_page_bbox(frame["source_bbox"], page)
             sections = [section for section in page.get("group_tree") or [] if _contains(section, frame_box) or (
@@ -157,7 +197,7 @@ def apply_operation_grouping(input_data: dict[str, Any]) -> dict[str, Any]:
             if not sections:
                 continue
             section = min(sections, key=lambda candidate: candidate["bbox"]["w"] * candidate["bbox"]["h"])
-            container = {"id": f"{page.get('id') or 'page'}-geometry-container-{frame_index:02d}", "type": "group", "role": "geometry_container", "bbox": frame_box, "source_bbox": frame["source_bbox"], "border_operations": frame["border_operations"], "children": []}
+            container = {"id": f"{page.get('id') or 'page'}-geometry-container-{frame_index:02d}", "type": "group", "role": "geometry_container", "bbox": frame_box, "source_bbox": frame["source_bbox"], "border_operations": frame_paint_operations(frame["source_bbox"], frame["border_operations"]), "children": []}
             section.setdefault("children", []).append(container)
             containers.append(container)
         for index, cluster in enumerate(clusters, start=1):
