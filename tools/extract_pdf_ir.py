@@ -320,6 +320,8 @@ def extract(pdf_path: Path, output: Path) -> dict[str, Any]:
             instructions = pikepdf.parse_content_stream(page)
             pages.append({
                 "id": f"page-{index + 1:03d}",
+                "type": "page",
+                "role": "page_container",
                 "index": index,
                 "page_ref": page_ref,
                 "media_box": scalar(page.get("/MediaBox")),
@@ -333,6 +335,8 @@ def extract(pdf_path: Path, output: Path) -> dict[str, Any]:
             })
     result = {
         "schema": SCHEMA,
+        "type": "document",
+        "role": "document_container",
         "source": {"path": str(pdf_path.resolve()), "sha256": digest},
         "pages": pages,
         "objects": graph.objects,

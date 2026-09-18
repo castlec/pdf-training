@@ -541,9 +541,19 @@ def render(input_path: Path, output_path: Path) -> dict[str, Any]:
     raw = json.loads(input_path.read_text(encoding="utf-8"))
     if raw.get("schema") != SCHEMA:
         raise ValueError(f"expected input schema {SCHEMA}")
+    if raw.get("type") != "document" or raw.get("role") != "document_container":
+        raise ValueError("PDF IR must have an explicit document_container root")
+    raw_pages = raw.get("pages")
+    if not isinstance(raw_pages, list):
+        raise ValueError("document_container must contain a pages list")
+    for page_number, raw_page in enumerate(raw_pages, start=1):
+        if not isinstance(raw_page, dict):
+            raise ValueError(f"page {page_number} is not a page container")
+        if raw_page.get("type") != "page" or raw_page.get("role") != "page_container":
+            raise ValueError(f"page {page_number} must have an explicit page_container root")
     pdf = pikepdf.Pdf.new()
     resolver = Resolver(pdf, raw.get("objects") or {})
-    for raw_page in raw.get("pages") or []:
+    for raw_page in raw_pages:
         media = raw_page["media_box"]
         width = float(media[2]) - float(media[0])
         height = float(media[3]) - float(media[1])
@@ -555,11 +565,8 @@ def render(input_path: Path, output_path: Path) -> dict[str, Any]:
         page.Rotate = resolver.value(raw_page.get("rotate", 0))
         page.UserUnit = resolver.value(raw_page.get("user_unit", 1))
         resources = page_field(resolver, raw_page, "/Resources")
-        contents = page_field(resolver, raw_page, "/Contents")
         if resources is not None:
             page.Resources = resources
-        if contents is not None:
-            page.Contents = contents
         def has_localized_group(value: dict[str, Any]) -> bool:
             if value.get("operations_localized"):
                 return True
@@ -597,6 +604,7 @@ def render(input_path: Path, output_path: Path) -> dict[str, Any]:
             )
             applied_contexts = 0
         else:
+            page.Contents = serialize_operations(pdf, resolver, raw_page.get("operations") or [])
             applied_contexts = 0
         debug_overlays = []
         seen_overlay_ids: set[str] = set()
