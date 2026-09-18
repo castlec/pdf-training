@@ -143,7 +143,7 @@ def apply_operation_grouping(input_data: dict[str, Any]) -> dict[str, Any]:
         realization = page.get("realization") or {}
         operations = realization.get("operations") or page.get("operations") or []
         clusters = _cluster_blocks(_marked_geometry_blocks(operations))
-        page["operation_groups"] = []
+        page["operation_groups"] = list(page.get("operation_groups") or [])
         containers = []
 
         def frame_paint_operations(source_bbox: dict[str, float], seed: list[int]) -> list[int]:

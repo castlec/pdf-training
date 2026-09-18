@@ -54,6 +54,7 @@ from tools.rule_grouping import apply_horizontal_rule_grouping
 from tools.diagnostic_text import INJECT_TEXT_LINES_TRANSFORM_ID, inject_text_lines_into_first_cell
 from tools.operation_grouping import CONTENT_GROUP_TRANSFORM_ID, INTRINSIC_LAYOUT_TRANSFORM_ID, ONE_CELL_TABLE_TRANSFORM_ID, OPERATION_TREE_TRANSFORM_ID, ORIGIN_PROOF_TRANSFORM_ID, TEXT_ASSOCIATION_TRANSFORM_ID, TRANSFORM_ID as OPERATION_GROUPING_ID, apply_intrinsic_container_layout, apply_operation_grouping, associate_text_operations, expand_associated_content, materialize_operation_tree, move_groups_to_parent_origin, promote_content_groups_to_one_cell_tables
 from tools.localize_operations import TRANSFORM_ID as LOCALIZE_OPERATIONS_ID, apply_local_operation_coordinates
+from tools.native_table_structure import TRANSFORM_ID as NATIVE_TABLE_STRUCTURE_ID, materialize_native_tables
 
 TRANSFORMS: dict[str, Transform] = {
     IDENTITY_ID: identity,
@@ -71,6 +72,7 @@ TRANSFORMS: dict[str, Transform] = {
     LOCALIZE_OPERATIONS_ID: apply_local_operation_coordinates,
     RELATIVE_COORDINATES_ID: apply_relative_coordinates,
     DEBUG_VISUALIZATION_ID: apply_debug_visualization,
+    NATIVE_TABLE_STRUCTURE_ID: materialize_native_tables,
 }
 
 

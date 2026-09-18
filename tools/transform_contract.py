@@ -24,9 +24,8 @@ def _validate_cfg(node: dict[str, Any], path: str) -> None:
         raise TransformContractError(f"{path}: unsupported node type {node.get('type')!r}")
     layout_kind = node.get("layout_kind")
     children = _children(node)
-    if layout_kind == "table":
-        if not children or any(child.get("layout_kind") != "cell" for child in children):
-            raise TransformContractError(f"{path}: table must contain one or more cell children")
+    if layout_kind == "table" and not children:
+        raise TransformContractError(f"{path}: table must contain one or more container children")
     for index, child in enumerate(children):
         _validate_cfg(child, f"{path}/{index}")
 

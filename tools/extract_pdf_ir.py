@@ -306,11 +306,74 @@ def validate_operation_parity(tree: dict[str, Any], operations: list[dict[str, A
     return errors
 
 
+def _structure_children(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, pikepdf.Array):
+        return list(value)
+    return [value]
+
+
+def _native_structure_value(value: Any) -> Any:
+    if isinstance(value, pikepdf.Array):
+        return [_native_structure_value(item) for item in value]
+    if isinstance(value, pikepdf.Dictionary):
+        object_type = name_value(value.get("/Type")) if value.get("/Type") is not None else None
+        structure_role = value.get("/S")
+        if structure_role is not None:
+            node: dict[str, Any] = {
+                "type": "pdf_struct_element",
+                "role": name_value(structure_role),
+                "children": [_native_structure_value(item) for item in _structure_children(value.get("/K"))],
+            }
+            page_ref = ref_for(value.get("/Pg"))
+            if page_ref is not None:
+                node["page_ref"] = page_ref
+            if value.get("/A") is not None:
+                node["attributes"] = scalar(value.get("/A"))
+            if value.get("/Alt") is not None:
+                node["alt"] = scalar(value.get("/Alt"))
+            return node
+        if object_type == "/MCR" or value.get("/MCID") is not None:
+            node = {"type": "pdf_marked_content", "mcid": int(value.get("/MCID"))}
+            page_ref = ref_for(value.get("/Pg"))
+            if page_ref is not None:
+                node["page_ref"] = page_ref
+            return node
+        if object_type == "/OBJR":
+            return {"type": "pdf_object_reference", "object": scalar(value.get("/Obj"))}
+        return {"type": "pdf_structure_value", "value": scalar(value)}
+    if isinstance(value, bool):
+        return value
+    try:
+        return {"type": "pdf_marked_content", "mcid": int(value)}
+    except (TypeError, ValueError):
+        return scalar(value)
+
+
+def native_structure_tree(pdf: pikepdf.Pdf) -> dict[str, Any] | None:
+    structure_root = pdf.Root.get("/StructTreeRoot")
+    if structure_root is None:
+        return None
+    role_map = {
+        name_value(key): name_value(value)
+        for key, value in (structure_root.get("/RoleMap") or {}).items()
+    }
+    return {
+        "schema": "pdf-training-pdf-structure-v1",
+        "type": "pdf_structure_root",
+        "children": [_native_structure_value(item) for item in _structure_children(structure_root.get("/K"))],
+        "role_map": role_map,
+    }
+
+
 def extract(pdf_path: Path, output: Path) -> dict[str, Any]:
     graph = ObjectGraph()
     pages = []
     digest = hashlib.sha256(pdf_path.read_bytes()).hexdigest()
+    native_structure: dict[str, Any] | None = None
     with pikepdf.Pdf.open(pdf_path) as pdf:
+        native_structure = native_structure_tree(pdf)
         for index, page in enumerate(pdf.pages):
             page_ref = graph.add(page.obj)
             resources = page.get("/Resources")
@@ -330,6 +393,7 @@ def extract(pdf_path: Path, output: Path) -> dict[str, Any]:
                 "user_unit": scalar(page.get("/UserUnit", 1)),
                 "resources_ref": resources_ref,
                 "contents_ref": contents_ref,
+                "struct_parents": scalar(page.get("/StructParents")) if page.get("/StructParents") is not None else None,
                 "operations": [typed_operation(item, ordinal) for ordinal, item in enumerate(instructions)],
                 "structured_operations": structured_operations([typed_operation(item, ordinal) for ordinal, item in enumerate(instructions)]),
             })
@@ -340,6 +404,7 @@ def extract(pdf_path: Path, output: Path) -> dict[str, Any]:
         "source": {"path": str(pdf_path.resolve()), "sha256": digest},
         "pages": pages,
         "objects": graph.objects,
+        "native_structure": native_structure,
         "summary": {
             "pages": len(pages),
             "objects": len(graph.objects),

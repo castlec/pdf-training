@@ -2,6 +2,7 @@
   "schema": "pdf-training-transform-pipeline-v1",
   "id": "group-horizontal-relative-wingdings-v1",
   "transforms": [
+    {"id": "structure.materialize-native-tables.v1"},
     {
       "id": "font.catalog.v1",
       "options": {
