@@ -1,0 +1,12 @@
+{
+  "schema": "pdf-training-transform-pipeline-v1",
+  "id": "font-catalog-wingdings-v1",
+  "transforms": [
+    {
+      "id": "font.catalog.v1",
+      "options": {
+        "replace_with": "Wingdings"
+      }
+    }
+  ]
+}

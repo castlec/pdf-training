@@ -1,0 +1,23 @@
+{
+  "schema": "pdf-training-transform-pipeline-v1",
+  "id": "group-horizontal-relative-wingdings-v1",
+  "transforms": [
+    {
+      "id": "font.catalog.v1",
+      "options": {
+        "replace_with": "Wingdings"
+      }
+    },
+    {"id": "group.horizontal-rules.v1"},
+    {"id": "geometry.operations-into-groups.v1"},
+    {
+      "id": "layout.associate-text-operations.v1",
+      "options": {
+        "collision_span": {"left": 40, "right": 24, "top": 24, "bottom": 24, "units": "pdf-user-space"}
+      }
+    },
+    {"id": "layout.expand-associated-content.v1"},
+    {"id": "geometry.localize-operation-groups.v1"},
+    {"id": "layout.relative-coordinates.v1"}
+  ]
+}

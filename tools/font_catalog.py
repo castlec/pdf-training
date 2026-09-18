@@ -3,8 +3,11 @@
 
 from __future__ import annotations
 
+import base64
 import copy
+import io
 import re
+from pathlib import Path
 from collections import defaultdict
 from collections.abc import Mapping
 from typing import Any
@@ -181,6 +184,139 @@ def _text_font_usage(pages: list[Any]) -> dict[str, dict[str, Any]]:
     return usage
 
 
+def _next_object_ref(objects: Mapping[str, Any]) -> str:
+    numbers = []
+    for reference in objects:
+        match = re.match(r"^(\d+)\s+0$", str(reference))
+        if match:
+            numbers.append(int(match.group(1)))
+    return f"{max(numbers, default=0) + 1} 0"
+
+
+def _page_font_dictionary(objects: Mapping[str, Any], page: Mapping[str, Any]) -> dict[str, Any]:
+    page_values = _values(objects, page.get("page_ref") or page.get("resources_ref"))
+    resources = page_values.get("/Resources")
+    if resources is not None:
+        resources_values = _values(objects, resources)
+    else:
+        resources_values = page_values
+    fonts = resources_values.get("/Font")
+    if not isinstance(fonts, dict):
+        raise FontCatalogError(f"page {page.get('index')} has no mutable font resource dictionary")
+    return fonts
+
+
+def _wingdings_path(options: Mapping[str, Any]) -> Path:
+    configured = options.get("wingdings_path")
+    candidates = [
+        Path(configured) if configured else None,
+        Path("/mnt/c/Windows/Fonts/wingding.ttf"),
+        Path("/mnt/c/Windows/Fonts/WINGDING.TTF"),
+    ]
+    for candidate in candidates:
+        if candidate is not None and candidate.is_file():
+            return candidate
+    raise FontCatalogError("Wingdings was requested but no wingding.ttf was found; set wingdings_path")
+
+
+def _wingdings_objects(objects: dict[str, Any], options: Mapping[str, Any]) -> tuple[str, str, dict[str, Any]]:
+    path = _wingdings_path(options)
+    try:
+        from fontTools.ttLib import TTFont
+    except ImportError as exc:
+        raise FontCatalogError("Wingdings embedding requires the fonttools package") from exc
+    try:
+        font = TTFont(str(path), lazy=False, recalcBBoxes=False, recalcTimestamp=False)
+    except Exception as exc:
+        raise FontCatalogError(f"unable to read Wingdings font {path}") from exc
+    units_per_em = int(font["head"].unitsPerEm)
+    hmtx = font["hmtx"].metrics
+    cmap = {}
+    for table in font["cmap"].tables:
+        if table.platformID == 3 and table.platEncID == 0:
+            cmap.update(table.cmap)
+    if not cmap:
+        cmap = font.getBestCmap() or {}
+
+    def glyph_for_code(code: int) -> str:
+        return cmap.get(0xF000 + code) or cmap.get(code) or ".notdef"
+
+    def scale(value: int | float) -> int:
+        return round(float(value) * 1000 / units_per_em)
+
+    glyph_names = [glyph_for_code(code) for code in range(256)]
+    widths = [scale(hmtx.get(glyph, (0, 0))[0]) for glyph in glyph_names]
+    bbox = font["head"]
+    hhea = font["hhea"]
+    os2 = font["OS/2"]
+    post = font["post"]
+    raw_font = path.read_bytes()
+    stream_ref = _next_object_ref(objects)
+    descriptor_ref = _next_object_ref({**objects, stream_ref: {}})
+    widths_ref = _next_object_ref({**objects, stream_ref: {}, descriptor_ref: {}})
+    font_ref = _next_object_ref({**objects, stream_ref: {}, descriptor_ref: {}, widths_ref: {}})
+    differences: list[Any] = [0]
+    differences.extend({"type": "name", "value": "/" + glyph} for glyph in glyph_names)
+    objects[stream_ref] = {
+        "ref": stream_ref,
+        "kind": "stream",
+        "dictionary": {"/Length1": len(raw_font)},
+        "decoded_bytes_b64": base64.b64encode(raw_font).decode("ascii"),
+    }
+    objects[descriptor_ref] = {
+        "ref": descriptor_ref,
+        "kind": "dictionary",
+        "values": {
+            "/Type": {"type": "name", "value": "/FontDescriptor"},
+            "/FontName": {"type": "name", "value": "/Wingdings"},
+            "/Flags": 4,
+            "/FontBBox": [scale(bbox.xMin), scale(bbox.yMin), scale(bbox.xMax), scale(bbox.yMax)],
+            "/ItalicAngle": float(post.italicAngle),
+            "/Ascent": scale(hhea.ascent),
+            "/Descent": scale(hhea.descent),
+            "/CapHeight": scale(getattr(os2, "sCapHeight", hhea.ascent)),
+            "/StemV": 80,
+            "/FontFile2": {"ref": stream_ref},
+        },
+    }
+    objects[widths_ref] = {"ref": widths_ref, "kind": "array", "values": widths}
+    objects[font_ref] = {
+        "ref": font_ref,
+        "kind": "dictionary",
+        "values": {
+            "/Type": {"type": "name", "value": "/Font"},
+            "/Subtype": {"type": "name", "value": "/TrueType"},
+            "/BaseFont": {"type": "name", "value": "/Wingdings"},
+            "/FirstChar": 0,
+            "/LastChar": 255,
+            "/Widths": {"ref": widths_ref},
+            "/Encoding": {
+                "/Type": {"type": "name", "value": "/Encoding"},
+                "/BaseEncoding": {"type": "name", "value": "/WinAnsiEncoding"},
+                "/Differences": differences,
+            },
+            "/FontDescriptor": {"ref": descriptor_ref},
+        },
+    }
+    return font_ref, "FWingdings", {
+        "object_ref": font_ref,
+        "base_font": "Wingdings",
+        "family": "Wingdings",
+        "style": "Regular",
+        "subset": False,
+        "subtype": "TrueType",
+        "encoding": "WinAnsiEncoding",
+        "embedded": True,
+        "embedded_streams": ["FontFile2"],
+        "descriptor_ref": descriptor_ref,
+        "to_unicode_ref": None,
+        "metrics": {"first_char": 0, "last_char": 255, "width_count": len(widths), "non_positive_width_count": sum(width <= 0 for width in widths)},
+        "issues": ["symbol-font-no-unicode-cmap"],
+        "resource_names": ["FWingdings"],
+        "usage": {"pages": [], "sizes": [], "tf_operations": 0},
+    }
+
+
 def _normalization_mapping(options: Mapping[str, Any]) -> dict[str, str]:
     raw_mapping = options.get("resource_mapping", {})
     if not isinstance(raw_mapping, Mapping):
@@ -240,7 +376,25 @@ def catalogue_fonts(document: dict[str, Any], options: Mapping[str, Any] | None 
         }
         entries.append(entry)
     entries.sort(key=lambda item: (item["resource_names"] or [""], item["object_ref"]))
+    wingdings_entry = None
+    wingdings_requested = str(options.get("replace_with", "")).lower() == "wingdings" or bool(options.get("wingdings"))
     mapping = _normalization_mapping(options)
+    if wingdings_requested:
+        if mapping:
+            raise FontCatalogError("Wingdings replacement cannot be combined with resource_mapping")
+        wingdings_ref, wingdings_name, wingdings_entry = _wingdings_objects(objects, options)
+        source_names = sorted({
+            resource_name
+            for page in result.get("pages", [])
+            if isinstance(page, Mapping)
+            for resource_name in _page_font_resources(objects, page)
+        })
+        mapping = {source_name: wingdings_name for source_name in source_names}
+        for page in result.get("pages", []):
+            if isinstance(page, Mapping):
+                _page_font_dictionary(objects, page)["/" + wingdings_name] = {"ref": wingdings_ref}
+    if wingdings_entry is not None:
+        entries.append(wingdings_entry)
     rewritten = _rewrite_font_resources(result, mapping) if mapping else 0
     metadata = result.setdefault("metadata", {})
     if not isinstance(metadata, dict):

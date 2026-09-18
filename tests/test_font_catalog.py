@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 
 import pytest
 
@@ -107,3 +108,19 @@ def test_font_catalog_metadata_is_part_of_the_transform_cfg() -> None:
     invalid["metadata"]["font_catalog"]["schema"] = "unknown"
     with pytest.raises(TransformContractError, match="unknown schema"):
         validate_transform_result(invalid)
+
+
+@pytest.mark.skipif(not Path("/mnt/c/Windows/Fonts/wingding.ttf").is_file(), reason="Windows Wingdings font is unavailable")
+def test_catalogue_can_embed_wingdings_at_the_catalog_stage() -> None:
+    result = catalogue_fonts(
+        _document(),
+        {"replace_with": "Wingdings", "wingdings_path": "/mnt/c/Windows/Fonts/wingding.ttf"},
+    )
+
+    assert result["pages"][0]["operations"][0]["operands"][0] == {"type": "name", "value": "/FWingdings"}
+    assert "/FWingdings" in result["objects"]["1 0"]["values"]["/Resources"]["/Font"]
+    catalog = result["metadata"]["font_catalog"]
+    assert catalog["resource_mapping"] == {"/F1": "/FWingdings", "/F2": "/FWingdings"}
+    assert catalog["rewritten_tf_operations"] == 2
+    assert any(font["family"] == "Wingdings" and font["embedded"] for font in catalog["fonts"])
+    validate_transform_result(result)
