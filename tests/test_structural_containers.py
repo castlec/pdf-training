@@ -4,7 +4,8 @@ import pikepdf
 import pytest
 
 from tools.extract_pdf_ir import extract
-from tools.render_pdf_ir import render
+from tools.render_pdf_ir import _group_transform, render
+from tools.relative_coordinates import apply_relative_coordinates
 from tools.transform_library import apply_transform
 
 
@@ -70,11 +71,13 @@ def test_native_table_transform_materializes_recursive_containers_and_removes_pd
                 "media_box": [0, 0, 10, 10],
                 "operations": [
                     {"ordinal": 0, "operator": "BDC", "operands": [{"type": "name", "value": "/P"}, {"/MCID": 1}]},
-                    {"ordinal": 1, "operator": "TJ", "operands": [{"type": "string", "value": "outer"}]},
-                    {"ordinal": 2, "operator": "EMC", "operands": []},
-                    {"ordinal": 3, "operator": "BDC", "operands": [{"type": "name", "value": "/P"}, {"/MCID": 2}]},
-                    {"ordinal": 4, "operator": "TJ", "operands": [{"type": "string", "value": "nested"}]},
-                    {"ordinal": 5, "operator": "EMC", "operands": []},
+                    {"ordinal": 1, "operator": "re", "operands": [1, 2, 3, 4]},
+                    {"ordinal": 2, "operator": "TJ", "operands": [{"type": "string", "value": "outer"}]},
+                    {"ordinal": 3, "operator": "EMC", "operands": []},
+                    {"ordinal": 4, "operator": "BDC", "operands": [{"type": "name", "value": "/P"}, {"/MCID": 2}]},
+                    {"ordinal": 5, "operator": "re", "operands": [5, 6, 2, 2]},
+                    {"ordinal": 6, "operator": "TJ", "operands": [{"type": "string", "value": "nested"}]},
+                    {"ordinal": 7, "operator": "EMC", "operands": []},
                 ],
             }
         ],
@@ -133,8 +136,35 @@ def test_native_table_transform_materializes_recursive_containers_and_removes_pd
 
     assert "native_structure" not in result
     assert outer_table["layout_kind"] == "table"
-    assert outer_cell["source_operation_ordinals"] == [0, 1, 2]
+    assert outer_cell["source_operation_ordinals"] == [0, 1, 2, 3]
+    assert outer_cell["source_frame_pdf"] == {"x": 1.0, "y": 2.0, "w": 6.0, "h": 6.0}
+    assert outer_cell["coordinate_space"]["name"] == "parent-relative-pdf"
     assert nested_table["layout_kind"] == "table"
-    assert nested_cell["source_operation_ordinals"] == [3, 4, 5]
+    assert nested_cell["source_operation_ordinals"] == [4, 5, 6, 7]
+    assert nested_cell["source_frame_pdf"] == {"x": 5.0, "y": 6.0, "w": 2.0, "h": 2.0}
+
+    after_relative = apply_relative_coordinates(result)
+    assert after_relative["pages"][0]["operation_groups"][0]["layout_position"]["offset"] == {"x": 1.0, "y": 2.0}
+
+    root = {
+        "coordinate_space": {"name": "parent-relative-pdf"},
+        "source_frame_pdf": {"x": 10.0, "y": 10.0},
+        "layout_position": {"offset": {"x": 20.0, "y": 30.0}},
+    }
+    root_transform = _group_transform(None, root)
+    assert root_transform == [1, 0, 0, 1, 10.0, 20.0]
+    child = {
+        "coordinate_space": {"name": "parent-relative-pdf"},
+        "source_frame_pdf": {"x": 12.0, "y": 14.0},
+        "layout_position": {"offset": {"x": 2.0, "y": 4.0}},
+    }
+    child_transform = _group_transform(
+        None,
+        child,
+        current_translation={"x": 10.0, "y": 20.0},
+        parent_target_origin={"x": 20.0, "y": 30.0},
+    )
+    assert child_transform == [1, 0, 0, 1, 0.0, 0.0]
+
     serialized = json.dumps(result)
     assert all(role not in serialized for role in ("/Table", "/TR", "/TH", "/TD"))

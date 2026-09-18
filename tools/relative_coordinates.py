@@ -111,6 +111,9 @@ def apply_relative_coordinates(input_data: dict[str, Any]) -> dict[str, Any]:
         previous_id = parent_id
         previous_box = {"x": 0.0, "y": 0.0, "w": 0.0, "h": 0.0}
         for item in items:
+            coordinate_space = item.get("coordinate_space") or {}
+            if isinstance(coordinate_space, dict) and coordinate_space.get("name") == "parent-relative-pdf":
+                continue
             box = item.get("bbox") or {}
             if all(key in box for key in ("x", "y", "w", "h")):
                 item["layout_position"] = {

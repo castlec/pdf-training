@@ -118,12 +118,36 @@ def _group_span(group: dict[str, Any]) -> tuple[int, int] | None:
     return min(values), max(values)
 
 
-def _group_transform(page: pikepdf.Page, group: dict[str, Any]) -> list[float] | None:
+def _group_transform(
+    page: pikepdf.Page,
+    group: dict[str, Any],
+    *,
+    current_translation: dict[str, float] | None = None,
+    parent_target_origin: dict[str, float] | None = None,
+) -> list[float] | None:
     transform = group.get("render_transform")
     if transform is not None:
         return [float(value) for value in transform]
     coordinate_space = group.get("coordinate_space") or {}
-    if not isinstance(coordinate_space, dict) or coordinate_space.get("origin_convention") != "top-left":
+    if not isinstance(coordinate_space, dict):
+        return None
+    if coordinate_space.get("name") == "parent-relative-pdf":
+        source = group.get("source_frame_pdf") or {}
+        layout = group.get("layout_position") or {}
+        offset = layout.get("offset") or {}
+        if not all(key in source for key in ("x", "y")) or not all(key in offset for key in ("x", "y")):
+            raise ValueError(f"relative group {group.get('id')} has no source frame or layout offset")
+        current = current_translation or {"x": 0.0, "y": 0.0}
+        parent_target = parent_target_origin or {"x": 0.0, "y": 0.0}
+        return [
+            1,
+            0,
+            0,
+            1,
+            float(parent_target.get("x", 0)) + float(offset["x"]) - float(source["x"]) - float(current.get("x", 0)),
+            float(parent_target.get("y", 0)) + float(offset["y"]) - float(source["y"]) - float(current.get("y", 0)),
+        ]
+    if coordinate_space.get("origin_convention") != "top-left":
         return None
     parent = group.get("parent_context_bbox_pdf") or group.get("parent_context_bbox")
     if not parent:
@@ -198,8 +222,17 @@ def render_recursive_operation_groups(pdf: pikepdf.Pdf, page: pikepdf.Page, reso
     for root in groups:
         assign(root, [])
 
-    def enter(group: dict[str, Any]) -> list[pikepdf.ContentStreamInstruction]:
-        transform = _group_transform(page, group)
+    def enter(
+        group: dict[str, Any],
+        parent_translation: dict[str, float],
+        parent_target_origin: dict[str, float],
+    ) -> tuple[list[pikepdf.ContentStreamInstruction], dict[str, float], dict[str, float]]:
+        transform = _group_transform(
+            page,
+            group,
+            current_translation=parent_translation,
+            parent_target_origin=parent_target_origin,
+        )
         coordinate_space = group.get("coordinate_space") or {}
         local = isinstance(coordinate_space, dict) and coordinate_space.get("origin_convention") == "top-left"
         paint = ((group.get("paint") or {}).get("debug") or {})
@@ -209,7 +242,21 @@ def render_recursive_operation_groups(pdf: pikepdf.Pdf, page: pikepdf.Page, reso
         result.extend(_debug_instructions(group.get("bbox") or {}, paint, height=height, local=local, before=True))
         for operation in group.get("render_operations") or []:
             result.append(pikepdf.ContentStreamInstruction([resolver.value(value) for value in operation.get("operands") or []], pikepdf.Operator(str(operation["operator"]))))
-        return result
+        next_translation = dict(parent_translation)
+        next_target_origin = dict(parent_target_origin)
+        if isinstance(coordinate_space, dict) and coordinate_space.get("name") == "parent-relative-pdf":
+            layout = group.get("layout_position") or {}
+            offset = layout.get("offset") or {}
+            next_target_origin = {
+                "x": parent_target_origin.get("x", 0.0) + float(offset.get("x", 0.0)),
+                "y": parent_target_origin.get("y", 0.0) + float(offset.get("y", 0.0)),
+            }
+            if transform is not None:
+                next_translation = {
+                    "x": parent_translation.get("x", 0.0) + float(transform[4]),
+                    "y": parent_translation.get("y", 0.0) + float(transform[5]),
+                }
+        return result, next_translation, next_target_origin
 
     def exit_context(group: dict[str, Any]) -> list[pikepdf.ContentStreamInstruction]:
         transform = _group_transform(page, group)
@@ -225,6 +272,8 @@ def render_recursive_operation_groups(pdf: pikepdf.Pdf, page: pikepdf.Page, reso
 
     instructions: list[pikepdf.ContentStreamInstruction] = []
     active: list[dict[str, Any]] = []
+    active_translations: list[dict[str, float]] = []
+    active_target_origins: list[dict[str, float]] = []
     rendered = 0
     for ordinal in sorted(by_ordinal):
         desired = owner_by_ordinal.get(ordinal, [])
@@ -234,8 +283,15 @@ def render_recursive_operation_groups(pdf: pikepdf.Pdf, page: pikepdf.Page, reso
         for group in reversed(active[common:]):
             instructions.extend(exit_context(group))
         active = active[:common]
+        active_translations = active_translations[:common]
+        active_target_origins = active_target_origins[:common]
         for group in desired[common:]:
-            instructions.extend(enter(group))
+            parent_translation = active_translations[-1] if active_translations else {"x": 0.0, "y": 0.0}
+            parent_target_origin = active_target_origins[-1] if active_target_origins else {"x": 0.0, "y": 0.0}
+            entered, translation, target_origin = enter(group, parent_translation, parent_target_origin)
+            instructions.extend(entered)
+            active_translations.append(translation)
+            active_target_origins.append(target_origin)
         if desired[common:] :
             rendered += sum(1 for group in desired[common:] if id(group) in owned_groups)
         active = desired
