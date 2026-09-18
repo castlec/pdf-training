@@ -78,6 +78,9 @@ def test_native_table_transform_materializes_recursive_containers_and_removes_pd
                     {"ordinal": 5, "operator": "re", "operands": [5, 6, 2, 2]},
                     {"ordinal": 6, "operator": "TJ", "operands": [{"type": "string", "value": "nested"}]},
                     {"ordinal": 7, "operator": "EMC", "operands": []},
+                    {"ordinal": 8, "operator": "BMC", "operands": [{"type": "name", "value": "/Artifact"}]},
+                    {"ordinal": 9, "operator": "re", "operands": [0, 1, 8, 8]},
+                    {"ordinal": 10, "operator": "EMC", "operands": []},
                 ],
             }
         ],
@@ -136,6 +139,9 @@ def test_native_table_transform_materializes_recursive_containers_and_removes_pd
 
     assert "native_structure" not in result
     assert outer_table["layout_kind"] == "table"
+    table_paint = [child for child in outer_table["children"] if child.get("role") == "table_paint"]
+    assert len(table_paint) == 1
+    assert table_paint[0]["source_operation_ordinals"] == [8, 9, 10]
     assert outer_cell["source_operation_ordinals"] == [0, 1, 2, 3]
     assert outer_cell["source_frame_pdf"] == {"x": 1.0, "y": 2.0, "w": 6.0, "h": 6.0}
     assert outer_cell["coordinate_space"]["name"] == "parent-relative-pdf"
@@ -144,7 +150,7 @@ def test_native_table_transform_materializes_recursive_containers_and_removes_pd
     assert nested_cell["source_frame_pdf"] == {"x": 5.0, "y": 6.0, "w": 2.0, "h": 2.0}
 
     after_relative = apply_relative_coordinates(result)
-    assert after_relative["pages"][0]["operation_groups"][0]["layout_position"]["offset"] == {"x": 1.0, "y": 2.0}
+    assert after_relative["pages"][0]["operation_groups"][0]["layout_position"]["offset"] == {"x": 0.0, "y": 1.0}
 
     root = {
         "coordinate_space": {"name": "parent-relative-pdf"},
