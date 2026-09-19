@@ -1,0 +1,15 @@
+{
+  "schema": "pdf-training-transform-pipeline-v1",
+  "id": "diagnostics-unprocessed-items-v1",
+  "description": "Report unowned text, path, image, and shading spans without changing render operations.",
+  "transforms": [
+    {
+      "id": "diagnostics.unprocessed-items.v1",
+      "options": {
+        "include_text": true,
+        "thin_rule_min_length": 6.0,
+        "thin_rule_max_thickness": 2.5
+      }
+    }
+  ]
+}
