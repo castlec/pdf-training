@@ -21,25 +21,71 @@ def _numbers(operation: dict[str, Any]) -> list[float]:
     return values
 
 
+def _matrix_multiply(first: list[float], second: list[float]) -> list[float]:
+    """Compose PDF affine matrices using column-vector coordinates."""
+    a, b, c, d, e, f = first
+    g, h, i, j, k, l = second
+    return [
+        a * g + c * h,
+        b * g + d * h,
+        a * i + c * j,
+        b * i + d * j,
+        a * k + c * l + e,
+        b * k + d * l + f,
+    ]
+
+
+def _transform_point(matrix: list[float], x: float, y: float) -> tuple[float, float]:
+    a, b, c, d, e, f = matrix
+    return (a * x + c * y + e, b * x + d * y + f)
+
+
 def _operation_bbox(operations: list[dict[str, Any]]) -> dict[str, float] | None:
     points: list[tuple[float, float]] = []
+    ctm = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+    ctm_stack: list[list[float]] = []
+
+    def add_point(x: float, y: float) -> None:
+        points.append(_transform_point(ctm, x, y))
+
     for operation in operations:
         operator = operation.get("operator")
         values = _numbers(operation)
-        if operator == "re" and len(values) >= 4:
-            x, y, w, h = values[:4]
-            points.extend([(x, y), (x + w, y + h)])
+        if operator == "q":
+            ctm_stack.append(ctm.copy())
+        elif operator == "Q":
+            if ctm_stack:
+                ctm = ctm_stack.pop()
+        elif operator == "cm" and len(values) >= 6:
+            ctm = _matrix_multiply(ctm, values[:6])
+        elif operator == "re" and len(values) >= 4:
+            x, y, width, height = values[:4]
+            for point_x, point_y in (
+                (x, y),
+                (x + width, y),
+                (x, y + height),
+                (x + width, y + height),
+            ):
+                add_point(point_x, point_y)
         elif operator in {"m", "l"} and len(values) >= 2:
-            points.append((values[0], values[1]))
+            add_point(values[0], values[1])
         elif operator == "c" and len(values) >= 6:
-            points.extend((values[index], values[index + 1]) for index in range(0, 6, 2))
+            for point_x, point_y in (
+                (values[0], values[1]),
+                (values[2], values[3]),
+                (values[4], values[5]),
+            ):
+                add_point(point_x, point_y)
     if not points:
         return None
-    x1 = min(point[0] for point in points)
-    y1 = min(point[1] for point in points)
-    x2 = max(point[0] for point in points)
-    y2 = max(point[1] for point in points)
-    return {"x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1}
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    return {
+        "x": min(xs),
+        "y": min(ys),
+        "w": max(xs) - min(xs),
+        "h": max(ys) - min(ys),
+    }
 
 
 def _marked_geometry_blocks(operations: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -56,7 +102,7 @@ def _marked_geometry_blocks(operations: list[dict[str, Any]]) -> list[dict[str, 
         elif operation.get("operator") == "EMC" and start is not None:
             block_operations = operations[start : index + 1]
             geometry = [item for item in block_operations if item.get("operator") in _GEOMETRY_OPS]
-            bbox = _operation_bbox(geometry)
+            bbox = _operation_bbox(block_operations)
             has_path_geometry = any(item.get("operator") in {"m", "l", "c", "h"} for item in geometry)
             if bbox and has_path_geometry:
                 blocks.append({"start": start, "end": index, "mcid": mcid, "bbox": bbox})
@@ -86,13 +132,32 @@ def _cluster_blocks(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [cluster for cluster in clusters if len(cluster["mcids"]) >= 2]
 
 
-def _to_page_bbox(raw: dict[str, float], page: dict[str, Any]) -> dict[str, float]:
+def _page_dimensions(page: dict[str, Any]) -> tuple[float, float, float, float]:
     media = page.get("realization", {}).get("media_box") or {}
     media_box = page.get("media_box") or []
-    raw_width = float(media.get("w") or (float(media_box[2]) - float(media_box[0]) if len(media_box) >= 4 else 0) or page.get("width") or 1)
-    raw_height = float(media.get("h") or (float(media_box[3]) - float(media_box[1]) if len(media_box) >= 4 else 0) or page.get("height") or 1)
+    if isinstance(media, dict):
+        raw_width = float(media.get("w") or 0)
+        raw_height = float(media.get("h") or 0)
+    else:
+        raw_width = 0.0
+        raw_height = 0.0
+    if len(media_box) >= 4:
+        raw_width = raw_width or float(media_box[2]) - float(media_box[0])
+        raw_height = raw_height or float(media_box[3]) - float(media_box[1])
+    raw_width = raw_width or float(page.get("width") or 1)
+    raw_height = raw_height or float(page.get("height") or 1)
     width = float(page.get("width") or raw_width)
     height = float(page.get("height") or raw_height)
+    return raw_width, raw_height, width, height
+
+
+def _page_bbox(page: dict[str, Any]) -> dict[str, float]:
+    _, _, width, height = _page_dimensions(page)
+    return {"x": 0.0, "y": 0.0, "w": width, "h": height}
+
+
+def _to_page_bbox(raw: dict[str, float], page: dict[str, Any]) -> dict[str, float]:
+    raw_width, raw_height, width, height = _page_dimensions(page)
     return {"x": raw["x"] * width / raw_width, "y": (raw_height - raw["y"] - raw["h"]) * height / raw_height, "w": raw["w"] * width / raw_width, "h": raw["h"] * height / raw_height}
 
 
@@ -144,6 +209,7 @@ def apply_operation_grouping(input_data: dict[str, Any]) -> dict[str, Any]:
         operations = realization.get("operations") or page.get("operations") or []
         clusters = _cluster_blocks(_marked_geometry_blocks(operations))
         page["operation_groups"] = list(page.get("operation_groups") or [])
+        page.setdefault("bbox", _page_bbox(page))
         containers = []
 
         def frame_paint_operations(source_bbox: dict[str, float], seed: list[int]) -> list[int]:
@@ -206,12 +272,13 @@ def apply_operation_grouping(input_data: dict[str, Any]) -> dict[str, Any]:
             parents = [candidate for candidate in containers if _contains(candidate, page_box)]
             if not parents:
                 parents = [candidate for candidate in page.get("group_tree") or [] if _contains(candidate, page_box)]
+            if not parents:
+                # The page container is the structural root for page-level marks
+                # that are not enclosed by a semantic section.
+                parents = [page]
             if parents:
                 parent = min(parents, key=lambda candidate: candidate["bbox"]["w"] * candidate["bbox"]["h"])
-                page_width = float(page.get("width") or 1)
-                page_height = float(page.get("height") or 1)
-                raw_width = float((page.get("realization") or {}).get("media_box", {}).get("w") or page_width)
-                raw_height = float((page.get("realization") or {}).get("media_box", {}).get("h") or page_height)
+                raw_width, raw_height, page_width, page_height = _page_dimensions(page)
                 parent_box = parent.get("bbox") or {}
                 group["parent_context_bbox"] = copy.deepcopy(parent_box)
                 group["parent_context_bbox_pdf"] = {
@@ -224,8 +291,9 @@ def apply_operation_grouping(input_data: dict[str, Any]) -> dict[str, Any]:
                     "x": float(page_box.get("x", 0)) * raw_width / page_width - group["parent_context_bbox_pdf"]["x"],
                     "y": float(page_box.get("y", 0)) * raw_height / page_height - group["parent_context_bbox_pdf"]["y"],
                 }
-                parent.setdefault("operation_groups", []).append(copy.deepcopy(group))
-                parent.setdefault("children", []).append(copy.deepcopy(group))
+                if parent is not page:
+                    parent.setdefault("operation_groups", []).append(copy.deepcopy(group))
+                    parent.setdefault("children", []).append(copy.deepcopy(group))
                 if parent in containers:
                     parent["container_role"] = "geometric_parent"
             else:

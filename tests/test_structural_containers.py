@@ -5,6 +5,7 @@ import pytest
 
 from tools.extract_pdf_ir import extract
 from tools.native_table_structure import _marked_content_ranges
+from tools.operation_grouping import _operation_bbox, apply_operation_grouping
 from tools.render_pdf_ir import _group_transform, render
 from tools.relative_coordinates import apply_relative_coordinates
 from tools.transform_library import apply_transform
@@ -56,6 +57,59 @@ def test_renderer_requires_explicit_document_and_page_containers(tmp_path):
     input_path.write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(ValueError, match="document_container"):
         render(input_path, tmp_path / "invalid.pdf")
+
+
+def test_operation_bbox_applies_graphics_state_transforms():
+    operations = [
+        {"operator": "q", "operands": []},
+        {"operator": "cm", "operands": [1, 0, 0, 1, 401.6000061, 249.9700012]},
+        {"operator": "m", "operands": [0, 0]},
+        {"operator": "l", "operands": [15.87, -15.87]},
+        {"operator": "Q", "operands": []},
+    ]
+
+    bbox = _operation_bbox(operations)
+
+    assert bbox is not None
+    assert bbox["x"] == pytest.approx(401.6000061)
+    assert bbox["y"] == pytest.approx(234.1000012)
+    assert bbox["w"] == pytest.approx(15.87)
+    assert bbox["h"] == pytest.approx(15.87)
+
+
+def test_page_container_owns_page_level_geometry_once():
+    document = {
+        "schema": "pdf-training-pdf-ir-v1",
+        "type": "document",
+        "role": "document_container",
+        "pages": [
+            {
+                "type": "page",
+                "role": "page_container",
+                "id": "page-001",
+                "media_box": [0, 0, 100, 200],
+                "operations": [
+                    {"ordinal": 0, "operator": "BDC", "operands": [{"type": "name", "value": "/P"}, {"/MCID": 1}]},
+                    {"ordinal": 1, "operator": "m", "operands": [0, 0]},
+                    {"ordinal": 2, "operator": "l", "operands": [10, 10]},
+                    {"ordinal": 3, "operator": "EMC", "operands": []},
+                    {"ordinal": 4, "operator": "BDC", "operands": [{"type": "name", "value": "/P"}, {"/MCID": 2}]},
+                    {"ordinal": 5, "operator": "m", "operands": [20, 0]},
+                    {"ordinal": 6, "operator": "l", "operands": [30, 10]},
+                    {"ordinal": 7, "operator": "EMC", "operands": []},
+                ],
+            }
+        ],
+    }
+
+    result = apply_operation_grouping(document)
+    page = result["pages"][0]
+
+    assert page["bbox"] == {"x": 0.0, "y": 0.0, "w": 100.0, "h": 200.0}
+    assert len(page["operation_groups"]) == 1
+    group = page["operation_groups"][0]
+    assert group["parent_context_bbox"] == page["bbox"]
+    assert group["parent_context_bbox_pdf"] == {"x": 0.0, "y": 0.0, "w": 100.0, "h": 200.0}
 
 
 def test_marked_content_ownership_includes_enclosing_graphics_context():
