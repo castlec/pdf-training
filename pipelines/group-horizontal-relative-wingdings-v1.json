@@ -3,12 +3,6 @@
   "id": "group-horizontal-relative-wingdings-v1",
   "transforms": [
     {"id": "structure.materialize-native-tables.v1"},
-    {
-      "id": "font.catalog.v1",
-      "options": {
-        "replace_with": "Wingdings"
-      }
-    },
     {"id": "group.horizontal-rules.v1"},
     {"id": "geometry.operations-into-groups.v1"},
     {
