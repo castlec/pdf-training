@@ -55,9 +55,23 @@ def _find_mcid(value: Any) -> int | None:
     return None
 
 
+def _graphics_context_pairs(operations: list[dict[str, Any]]) -> list[tuple[int, int]]:
+    stack: list[int] = []
+    pairs: list[tuple[int, int]] = []
+    for operation in operations:
+        ordinal = int(operation.get("ordinal", -1))
+        operator = str(operation.get("operator"))
+        if operator == "q":
+            stack.append(ordinal)
+        elif operator == "Q" and stack:
+            pairs.append((stack.pop(), ordinal))
+    return pairs
+
+
 def _marked_content_ranges(operations: list[dict[str, Any]]) -> dict[int, list[int]]:
     active: list[tuple[int | None, int]] = []
     ranges: dict[int, list[int]] = {}
+    graphics_contexts = _graphics_context_pairs(operations)
     for operation in operations:
         ordinal = int(operation.get("ordinal", -1))
         operator = str(operation.get("operator"))
@@ -68,7 +82,13 @@ def _marked_content_ranges(operations: list[dict[str, Any]]) -> dict[int, list[i
         elif operator == "EMC" and active:
             mcid, start = active.pop()
             if mcid is not None:
-                ranges.setdefault(mcid, []).extend(range(start, ordinal + 1))
+                context_starts = [
+                    context_start
+                    for context_start, context_end in graphics_contexts
+                    if context_start < start and context_end <= ordinal
+                ]
+                render_start = max(context_starts, default=start)
+                ranges.setdefault(mcid, []).extend(range(render_start, ordinal + 1))
     return {mcid: sorted(set(ordinals)) for mcid, ordinals in ranges.items()}
 
 

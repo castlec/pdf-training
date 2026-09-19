@@ -4,6 +4,7 @@ import pikepdf
 import pytest
 
 from tools.extract_pdf_ir import extract
+from tools.native_table_structure import _marked_content_ranges
 from tools.render_pdf_ir import _group_transform, render
 from tools.relative_coordinates import apply_relative_coordinates
 from tools.transform_library import apply_transform
@@ -55,6 +56,21 @@ def test_renderer_requires_explicit_document_and_page_containers(tmp_path):
     input_path.write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(ValueError, match="document_container"):
         render(input_path, tmp_path / "invalid.pdf")
+
+
+def test_marked_content_ownership_includes_enclosing_graphics_context():
+    operations = [
+        {"ordinal": 0, "operator": "q", "operands": []},
+        {"ordinal": 1, "operator": "re", "operands": [1, 2, 3, 4]},
+        {"ordinal": 2, "operator": "W*", "operands": []},
+        {"ordinal": 3, "operator": "n", "operands": []},
+        {"ordinal": 4, "operator": "BDC", "operands": [{"/MCID": 7}]},
+        {"ordinal": 5, "operator": "TJ", "operands": [{"type": "string", "value": "cell"}]},
+        {"ordinal": 6, "operator": "Q", "operands": []},
+        {"ordinal": 7, "operator": "EMC", "operands": []},
+    ]
+
+    assert _marked_content_ranges(operations)[7] == list(range(8))
 
 
 def test_native_table_transform_materializes_recursive_containers_and_removes_pdf_roles():
