@@ -41,8 +41,9 @@ def _owner_ids(page: dict[str, Any]) -> dict[int, set[str]]:
 
         node_id = value.get("id")
         path = ancestors + ((str(node_id),) if node_id is not None else ())
-        for ordinal in _source_ordinals(value.get("source_operation_ordinals")):
-            owners[ordinal].update(path)
+        for key in ("source_operation_ordinals", "operation_ordinals"):
+            for ordinal in _source_ordinals(value.get(key)):
+                owners[ordinal].update(path)
         for key in ("children", "nodes"):
             visit(value.get(key), path)
 

@@ -31,7 +31,7 @@ def test_unprocessed_item_diagnostics_preserves_operations_and_reports_candidate
                         "id": "paint-group",
                         "type": "group",
                         "children": [],
-                        "source_operation_ordinals": [3, 4],
+                        "operation_ordinals": [3, 4],
                     }
                 ],
             }
