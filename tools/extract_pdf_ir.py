@@ -30,7 +30,11 @@ def scalar(value: Any) -> Any:
     if isinstance(value, pikepdf.Name):
         return {"type": "name", "value": name_value(value)}
     if isinstance(value, pikepdf.String):
-        return {"type": "string", "value": str(value)}
+        return {
+            "type": "string",
+            "value": str(value),
+            "raw_bytes_b64": base64.b64encode(bytes(value)).decode("ascii"),
+        }
     if isinstance(value, (pikepdf.Array, list, tuple)):
         return [scalar(item) for item in value]
     if isinstance(value, (pikepdf.Dictionary, dict)):
@@ -71,7 +75,10 @@ class ObjectGraph:
             record["kind"] = "stream"
             record["dictionary"] = {name_value(key): scalar(item) for key, item in value.items()}
             record["raw_bytes_b64"] = base64.b64encode(value.read_raw_bytes()).decode("ascii")
-            record["decoded_bytes_b64"] = base64.b64encode(value.read_bytes()).decode("ascii")
+            try:
+                record["decoded_bytes_b64"] = base64.b64encode(value.read_bytes()).decode("ascii")
+            except pikepdf.PdfError as exc:
+                record["decode_error"] = str(exc)
             record["filter"] = scalar(value.get("/Filter"))
         elif isinstance(value, (pikepdf.Dictionary, dict)):
             record["kind"] = "dictionary"

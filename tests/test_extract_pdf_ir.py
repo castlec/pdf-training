@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from tools.extract_pdf_ir import structured_operations
+import base64
+
+import pikepdf
+
+from tools.extract_pdf_ir import scalar, structured_operations
 
 
 def op(ordinal: int, operator: str, operands: list[object] | None = None) -> dict[str, object]:
@@ -53,6 +57,12 @@ def test_structured_operations_have_exact_raw_parity() -> None:
 
     assert flatten_structured_operations(tree, operations) == [0, 1, 2, 3, 4]
     assert validate_operation_parity(tree, operations) == []
+
+
+def test_scalar_preserves_raw_pdf_string_bytes() -> None:
+    value = scalar(pikepdf.String(b"\x01\x1b"))
+    assert value["value"] == "\x01˙"
+    assert base64.b64decode(value["raw_bytes_b64"]) == b"\x01\x1b"
 
 
 def test_operation_parity_detects_missing_and_reordered_ordinals() -> None:

@@ -1,0 +1,33 @@
+{
+  "schema": "pdf-training-transform-pipeline-v1",
+  "id": "translation-ready-pre-gemma-v1",
+  "description": "Source-preserving structural pipeline that prepares a text-only, recursively contextualized translation job. It does not invoke Gemma or any other model.",
+  "transforms": [
+    {"id": "font.catalog.v1"},
+    {"id": "structure.materialize-native-tables.v1"},
+    {"id": "group.horizontal-rules.v1"},
+    {"id": "geometry.operations-into-groups.v1"},
+    {
+      "id": "layout.associate-text-operations.v1",
+      "options": {"collision_span": {"left": 40, "right": 24, "top": 24, "bottom": 24}}
+    },
+    {"id": "layout.expand-associated-content.v1"},
+    {"id": "translation.project.v1", "options": {
+      "target_language": "English",
+      "target_font_policy": {
+        "family": "Arial",
+        "fallback_family": "Liberation Sans",
+        "preserve_nominal_size": true,
+        "body_size_pt": 12.0,
+        "preferred_automatic_scale": 0.95,
+        "minimum_automatic_scale": 0.90,
+        "reflow_before_scale": true,
+        "never_scale_geometry_to_compensate_for_text": true
+      }
+    }},
+    {"id": "translation.validate.v1"},
+    {"id": "geometry.localize-operation-groups.v1"},
+    {"id": "layout.relative-coordinates.v1"},
+    {"id": "diagnostics.unprocessed-items.v1"}
+  ]
+}

@@ -92,6 +92,23 @@ def _marked_content_ranges(operations: list[dict[str, Any]]) -> dict[int, list[i
     return {mcid: sorted(set(ordinals)) for mcid, ordinals in ranges.items()}
 
 
+def _direct_marked_content_ranges(operations: list[dict[str, Any]]) -> dict[int, list[int]]:
+    active: list[tuple[int | None, int]] = []
+    ranges: dict[int, list[int]] = {}
+    for operation in operations:
+        ordinal = int(operation.get("ordinal", -1))
+        operator = str(operation.get("operator"))
+        if operator == "BDC":
+            active.append((_find_mcid(operation.get("operands") or []), ordinal))
+        elif operator == "BMC":
+            active.append((None, ordinal))
+        elif operator == "EMC" and active:
+            mcid, start = active.pop()
+            if mcid is not None:
+                ranges.setdefault(mcid, []).extend(range(start, ordinal + 1))
+    return {mcid: sorted(set(ordinals)) for mcid, ordinals in ranges.items()}
+
+
 def _descendant_mcids(value: dict[str, Any], *, stop_at_table: bool = True) -> list[int]:
     role = _role(value)
     if stop_at_table and role in _TABLE_ROLES and role not in {"/TH", "/TD"}:
@@ -217,6 +234,8 @@ def _refresh_source_frame(node: dict[str, Any], operations: list[dict[str, Any]]
 
 
 def _overlap(left: dict[str, float], right: dict[str, float]) -> float:
+    if not all(key in left and key in right for key in ("x", "y", "w", "h")):
+        return 0.0
     x = max(0.0, min(left["x"] + left["w"], right["x"] + right["w"]) - max(left["x"], right["x"]))
     y = max(0.0, min(left["y"] + left["h"], right["y"] + right["h"]) - max(left["y"], right["y"]))
     return x * y
@@ -346,7 +365,12 @@ def _materialize(
         "layout_kind": layout_kind,
         "children": children,
     }
-    ordinals = _operation_ordinals(value, ranges)
+    # Assign only direct marked content to each container. Descendant content
+    # belongs to its leaf or nested table, not to every ancestor.
+    ordinals = []
+    for mcid in _direct_content_mcids(value):
+        ordinals.extend(ranges.get(mcid) or [])
+    ordinals = sorted(set(ordinals))
     if ordinals:
         node["source_operation_ordinals"] = ordinals
     source = _operation_bbox(operations, ordinals)
@@ -375,7 +399,7 @@ def materialize_native_tables(document: dict[str, Any], *, options: dict[str, An
     for page in result.get("pages") or []:
         page_ref = str(page.get("page_ref"))
         operations = page.get("operations") or []
-        ranges = _marked_content_ranges(operations)
+        ranges = _direct_marked_content_ranges(operations)
         media_box = page.get("media_box") or [0, 0, 0, 0]
         page_height = float(media_box[3]) - float(media_box[1])
         table_groups = []

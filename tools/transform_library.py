@@ -56,6 +56,7 @@ from tools.operation_grouping import CONTENT_GROUP_TRANSFORM_ID, INTRINSIC_LAYOU
 from tools.localize_operations import TRANSFORM_ID as LOCALIZE_OPERATIONS_ID, apply_local_operation_coordinates
 from tools.native_table_structure import TRANSFORM_ID as NATIVE_TABLE_STRUCTURE_ID, materialize_native_tables
 from tools.unprocessed_items import TRANSFORM_ID as UNPROCESSED_ITEMS_ID, identify_unprocessed_items
+from tools.translation_projection import PROJECT_TRANSFORM_ID, VALIDATE_TRANSFORM_ID, project_translation, validate_translation_projection
 
 TRANSFORMS: dict[str, Transform] = {
     IDENTITY_ID: identity,
@@ -75,6 +76,8 @@ TRANSFORMS: dict[str, Transform] = {
     DEBUG_VISUALIZATION_ID: apply_debug_visualization,
     NATIVE_TABLE_STRUCTURE_ID: materialize_native_tables,
     UNPROCESSED_ITEMS_ID: identify_unprocessed_items,
+    PROJECT_TRANSFORM_ID: project_translation,
+    VALIDATE_TRANSFORM_ID: validate_translation_projection,
 }
 
 
